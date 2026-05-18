@@ -3,14 +3,7 @@ import JWTokensCore
 
 @main
 struct JWTokensApp: App {
-    @State private var viewModel = SpendDashboardViewModel(
-        spendService: SpendService(
-            apiKeyStore: KeychainAPIKeyStore(),
-            clientFactory: { baseURL, apiKey in
-                LiteLLMClient(baseURL: baseURL, apiKey: apiKey)
-            }
-        )
-    )
+    @State private var viewModel = JWTokensApp.makeViewModel()
     @State private var refreshCoordinator: SpendRefreshCoordinator?
 
     var body: some Scene {
@@ -25,5 +18,18 @@ struct JWTokensApp: App {
                     await viewModel.refresh()
                 }
         }
+    }
+
+    private static func makeViewModel() -> SpendDashboardViewModel {
+        let apiKeyStore = KeychainAPIKeyStore()
+        return SpendDashboardViewModel(
+            spendService: SpendService(
+                apiKeyStore: apiKeyStore,
+                clientFactory: { baseURL, apiKey in
+                    LiteLLMClient(baseURL: baseURL, apiKey: apiKey)
+                }
+            ),
+            apiKeyStore: apiKeyStore
+        )
     }
 }

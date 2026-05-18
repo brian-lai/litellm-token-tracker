@@ -66,6 +66,22 @@ struct FakeAPIKeyStore: APIKeyStoring {
     func deleteAPIKey() throws {}
 }
 
+final class MutableAPIKeyStore: APIKeyStoring, @unchecked Sendable {
+    var savedKeys: [String] = []
+
+    func readAPIKey() throws -> String {
+        savedKeys.last ?? ""
+    }
+
+    func saveAPIKey(_ apiKey: String) throws {
+        savedKeys.append(apiKey)
+    }
+
+    func deleteAPIKey() throws {
+        savedKeys.removeAll()
+    }
+}
+
 struct FakeClient: LiteLLMClientProtocol {
     var userResult: Result<LiteLLMUserContext, Error>
     var rowsResult: Result<[SpendLogSummaryRow], Error>
@@ -762,6 +778,27 @@ func testAuthFailureStopsTimerRetryUntilKeyChanges() async throws {
     try expectEqual(viewModel.currentSnapshot, refreshed, "resumed refresh should update snapshot")
 }
 
+@MainActor
+func testSavingAPIKeyClearsSetupPause() async throws {
+    let store = MutableAPIKeyStore()
+    let viewModel = SpendDashboardViewModel(
+        spendService: RecordingSpendService(results: []),
+        apiKeyStore: store
+    )
+    viewModel.requiresSetup = true
+    viewModel.pausesAutomaticRefresh = true
+    viewModel.errorMessage = "LiteLLM API key is missing"
+    viewModel.apiKeyDraft = "  secret-token  "
+
+    viewModel.saveAPIKey()
+
+    try expectEqual(store.savedKeys, ["secret-token"], "view model should save trimmed API key")
+    try expectEqual(viewModel.apiKeyDraft, "", "saved key should clear draft")
+    try expectEqual(viewModel.errorMessage, nil, "saving key should clear setup error")
+    try expect(!viewModel.requiresSetup, "saving key should clear setup state")
+    try expect(!viewModel.pausesAutomaticRefresh, "saving key should resume automatic refresh")
+}
+
 let syncTests: [(String, () throws -> Void)] = [
     ("testTestRunnerLoadsCoreTarget", testTestRunnerLoadsCoreTarget),
     ("testDecodesUserInfoSpendAndBudget", testDecodesUserInfoSpendAndBudget),
@@ -813,7 +850,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testFiresEveryFiveMinutes", testFiresEveryFiveMinutes),
     ("testManualRefreshCoalescesWithTimer", testManualRefreshCoalescesWithTimer),
     ("testManualRefreshUpdatesSnapshot", testManualRefreshUpdatesSnapshot),
-    ("testAuthFailureStopsTimerRetryUntilKeyChanges", testAuthFailureStopsTimerRetryUntilKeyChanges)
+    ("testAuthFailureStopsTimerRetryUntilKeyChanges", testAuthFailureStopsTimerRetryUntilKeyChanges),
+    ("testSavingAPIKeyClearsSetupPause", testSavingAPIKeyClearsSetupPause)
 ]
 
 var failures: [String] = []

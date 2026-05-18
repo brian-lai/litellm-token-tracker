@@ -46,7 +46,12 @@ struct SpendPopoverView: View {
             }
             .disabled(viewModel.isRefreshing)
             if presentation.showsKeyUpdateAction {
-                Button("Update API Key") {}
+                SecureField("LiteLLM API key", text: $viewModel.apiKeyDraft)
+                    .textFieldStyle(.roundedBorder)
+                Button("Save API Key") {
+                    viewModel.saveAPIKey()
+                }
+                .disabled(viewModel.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .frame(width: 280, alignment: .leading)
