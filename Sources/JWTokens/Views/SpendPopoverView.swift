@@ -34,6 +34,9 @@ struct SpendPopoverView: View {
                     .font(.caption)
                     .foregroundStyle(viewModel.currentSnapshot?.isStale == true ? .orange : .secondary)
             }
+            if let snapshot = viewModel.currentSnapshot {
+                DailySpendChartView(presentation: .make(points: snapshot.dailyPoints))
+            }
             if presentation.showsKeyUpdateAction {
                 Button("Update API Key") {}
             }

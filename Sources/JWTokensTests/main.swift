@@ -604,6 +604,34 @@ func testAuthErrorShowsKeyUpdateAction() throws {
     try expectEqual(presentation.statusText, "LiteLLM API key was rejected", "auth error should be visible")
 }
 
+func testDailyChartRendersOneBarPerPoint() throws {
+    let presentation = DailySpendChartPresentation.make(points: [
+        DailySpendPoint(date: try fixedDate("2026-05-16"), spendUSD: 2),
+        DailySpendPoint(date: try fixedDate("2026-05-17"), spendUSD: 4),
+        DailySpendPoint(date: try fixedDate("2026-05-18"), spendUSD: 8)
+    ])
+
+    try expectEqual(presentation.bars.count, 3, "chart should render one bar per daily point")
+    try expectEqual(presentation.bars.last?.heightRatio, 1, "largest spend should scale to full height")
+}
+
+func testTodayChartDoesNotRenderExclusiveEndDateBar() throws {
+    let dateRange = try utcDateRange()
+    let snapshot = SpendAggregator.snapshot(
+        rows: [
+            SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: 7),
+            SpendLogSummaryRow(date: try fixedDate("2026-05-19"), spendUSD: 0)
+        ],
+        range: .today,
+        dateRange: dateRange,
+        limitUSD: 80,
+        refreshedAt: try fixedDate("2026-05-18")
+    )
+    let presentation = DailySpendChartPresentation.make(points: snapshot.dailyPoints)
+
+    try expectEqual(presentation.bars.count, 1, "chart should not render the exclusive end date row")
+}
+
 @MainActor
 func testSelectingSameRangeDoesNotRefreshAgain() async throws {
     let service = RecordingSpendService(results: [])
@@ -657,7 +685,9 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testShowsAllFiveRanges", testShowsAllFiveRanges),
     ("testShowsSelectedRangeTotalAndPercent", testShowsSelectedRangeTotalAndPercent),
     ("testStaleSnapshotShowsTimestamp", testStaleSnapshotShowsTimestamp),
-    ("testAuthErrorShowsKeyUpdateAction", testAuthErrorShowsKeyUpdateAction)
+    ("testAuthErrorShowsKeyUpdateAction", testAuthErrorShowsKeyUpdateAction),
+    ("testDailyChartRendersOneBarPerPoint", testDailyChartRendersOneBarPerPoint),
+    ("testTodayChartDoesNotRenderExclusiveEndDateBar", testTodayChartDoesNotRenderExclusiveEndDateBar)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [
