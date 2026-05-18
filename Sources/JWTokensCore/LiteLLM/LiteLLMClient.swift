@@ -40,7 +40,7 @@ public struct LiteLLMClient: LiteLLMClientProtocol {
     }
 
     public func makeSpendRowsRequest(range: DateRange, userID: String) throws -> URLRequest {
-        let formatter = DateFormatter.liteLLMRequestDay
+        let formatter = DateFormatter.liteLLMRequestDay(timeZone: range.timeZone)
         var components = URLComponents(url: baseURL.appendingPathComponent("spend/logs"), resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "user_id", value: userID),
@@ -99,12 +99,12 @@ public struct LiteLLMClient: LiteLLMClientProtocol {
 }
 
 private extension DateFormatter {
-    static let liteLLMRequestDay: DateFormatter = {
+    static func liteLLMRequestDay(timeZone: TimeZone) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
-    }()
+    }
 }

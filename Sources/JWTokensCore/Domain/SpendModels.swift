@@ -13,10 +13,12 @@ public enum SpendRange: String, CaseIterable, Identifiable, Sendable {
 public struct DateRange: Equatable, Sendable {
     public let startDate: Date
     public let endDate: Date
+    public let timeZone: TimeZone
 
-    public init(startDate: Date, endDate: Date) {
+    public init(startDate: Date, endDate: Date, timeZone: TimeZone = .current) {
         self.startDate = startDate
         self.endDate = endDate
+        self.timeZone = timeZone
     }
 }
 
@@ -141,17 +143,17 @@ public struct SpendRangeResolver: DateRangeResolving {
 
         switch range {
         case .today:
-            return DateRange(startDate: today, endDate: tomorrow)
+            return DateRange(startDate: today, endDate: tomorrow, timeZone: calendar.timeZone)
         case .last7Days:
-            return DateRange(startDate: calendar.date(byAdding: .day, value: -6, to: today)!, endDate: tomorrow)
+            return DateRange(startDate: calendar.date(byAdding: .day, value: -6, to: today)!, endDate: tomorrow, timeZone: calendar.timeZone)
         case .last30Days:
-            return DateRange(startDate: calendar.date(byAdding: .day, value: -29, to: today)!, endDate: tomorrow)
+            return DateRange(startDate: calendar.date(byAdding: .day, value: -29, to: today)!, endDate: tomorrow, timeZone: calendar.timeZone)
         case .monthToDate:
             let components = calendar.dateComponents([.year, .month], from: today)
-            return DateRange(startDate: calendar.date(from: components)!, endDate: tomorrow)
+            return DateRange(startDate: calendar.date(from: components)!, endDate: tomorrow, timeZone: calendar.timeZone)
         case .yearToDate:
             let components = calendar.dateComponents([.year], from: today)
-            return DateRange(startDate: calendar.date(from: components)!, endDate: tomorrow)
+            return DateRange(startDate: calendar.date(from: components)!, endDate: tomorrow, timeZone: calendar.timeZone)
         }
     }
 }

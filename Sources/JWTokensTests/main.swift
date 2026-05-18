@@ -189,8 +189,12 @@ func testMonthToDateStartsAtFirstOfMonth() throws {
     try expectEqual(range.endDate, try fixedDate("2026-05-19"), "month-to-date should end tomorrow exclusive")
 }
 
+func utcDateRange(start: String = "2026-05-18", end: String = "2026-05-19") throws -> DateRange {
+    DateRange(startDate: try fixedDate(start), endDate: try fixedDate(end), timeZone: TimeZone(secondsFromGMT: 0)!)
+}
+
 func testSumsRowsAndComputesLimitPercent() throws {
-    let dateRange = DateRange(startDate: try fixedDate("2026-05-18"), endDate: try fixedDate("2026-05-19"))
+    let dateRange = try utcDateRange()
     let rows = [
         SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: Decimal(string: "5.25")!),
         SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: Decimal(string: "2.75")!)
@@ -204,7 +208,7 @@ func testSumsRowsAndComputesLimitPercent() throws {
 }
 
 func testDropsExclusiveEndDateRowsFromDailyPoints() throws {
-    let dateRange = DateRange(startDate: try fixedDate("2026-05-18"), endDate: try fixedDate("2026-05-19"))
+    let dateRange = try utcDateRange()
     let rows = [
         SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: 7),
         SpendLogSummaryRow(date: try fixedDate("2026-05-19"), spendUSD: 0)
@@ -229,7 +233,7 @@ func testUserInfoRequestUsesAuthorizationBearer() async throws {
 func testSpendLogsRequestUsesSummarizeTrueAndExclusiveEndDate() async throws {
     let loader = StubURLLoader(data: try fixtureData("spend-logs-summary.json"))
     let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
-    let range = DateRange(startDate: try fixedDate("2026-05-18"), endDate: try fixedDate("2026-05-19"))
+    let range = try utcDateRange()
 
     _ = try await client.fetchSpendRows(range: range, userID: "user-123")
 
@@ -256,7 +260,7 @@ func testMapsUnauthorized() async throws {
 func testMapsFullyInvalidJSONToMalformedResponse() async throws {
     let loader = StubURLLoader(data: Data(#"{"not":"array"}"#.utf8), statusCode: 200)
     let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
-    let range = DateRange(startDate: try fixedDate("2026-05-18"), endDate: try fixedDate("2026-05-19"))
+    let range = try utcDateRange()
 
     do {
         _ = try await client.fetchSpendRows(range: range, userID: "user-123")
@@ -280,7 +284,7 @@ func testRedactsAuthorizationHeaderFromLogs() async throws {
 func testFetchSpendRowsDoesNotComputeSnapshot() async throws {
     let loader = StubURLLoader(data: try fixtureData("spend-logs-summary.json"))
     let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
-    let range = DateRange(startDate: try fixedDate("2026-05-18"), endDate: try fixedDate("2026-05-19"))
+    let range = try utcDateRange()
 
     let rows = try await client.fetchSpendRows(range: range, userID: "user-123")
 
