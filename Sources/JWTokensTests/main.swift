@@ -55,6 +55,30 @@ final class FakeKeychainGateway: KeychainGateway, @unchecked Sendable {
     }
 }
 
+struct FakeAPIKeyStore: APIKeyStoring {
+    let result: Result<String, Error>
+
+    func readAPIKey() throws -> String {
+        try result.get()
+    }
+
+    func saveAPIKey(_ apiKey: String) throws {}
+    func deleteAPIKey() throws {}
+}
+
+struct FakeClient: LiteLLMClientProtocol {
+    var userResult: Result<LiteLLMUserContext, Error>
+    var rowsResult: Result<[SpendLogSummaryRow], Error>
+
+    func fetchCurrentUser() async throws -> LiteLLMUserContext {
+        try userResult.get()
+    }
+
+    func fetchSpendRows(range: DateRange, userID: String) async throws -> [SpendLogSummaryRow] {
+        try rowsResult.get()
+    }
+}
+
 func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     if !condition() {
         throw TestFailure(description: message)
@@ -296,6 +320,126 @@ func testDoesNotExposeKeyInErrorDescription() throws {
     try expect(!errorDescription.contains("secret-token"), "error description should not expose API keys")
 }
 
+func testRefreshFetchesUserThenTodaySpend() async throws {
+    let cache = InMemorySpendSnapshotCache()
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(spendLimitUSD: 80)),
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 100, maxBudgetUSD: nil, budgetResetAt: nil)),
+                rowsResult: .success([SpendLogSummaryRow(date: try! fixedDate("2026-05-18"), spendUSD: 8)])
+            )
+        },
+        cache: cache
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "expected refreshed result")
+    }
+    try expectEqual(snapshot.totalSpendUSD, 8, "service should aggregate today's spend")
+}
+
+func testReturnsStaleSnapshotOnTransientAPIFailure() async throws {
+    let stale = SpendSnapshot(range: .today, totalSpendUSD: 5, limitUSD: 80, percentOfLimit: Decimal(string: "0.0625")!, dailyPoints: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
+    let cache = InMemorySpendSnapshotCache()
+    try cache.saveSnapshot(stale)
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .failure(LiteLLMClientError.unavailable),
+                rowsResult: .success([])
+            )
+        },
+        cache: cache
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .stale(snapshot, _) = result else {
+        throw TestFailure(description: "expected stale result")
+    }
+    try expectEqual(snapshot.totalSpendUSD, 5, "service should return cached stale spend")
+}
+
+func testAuthFailureReturnsAuthFailedWithoutRetrying() async throws {
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .failure(LiteLLMClientError.unauthorized),
+                rowsResult: .success([])
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case .authFailed = result else {
+        throw TestFailure(description: "expected authFailed result")
+    }
+}
+
+func testMissingKeyReturnsSetupRequired() async throws {
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .failure(APIKeyStoreError.missingKey)),
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .failure(LiteLLMClientError.unavailable),
+                rowsResult: .success([])
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case .setupRequired = result else {
+        throw TestFailure(description: "expected setupRequired result")
+    }
+}
+
+func testMalformedResponseWithoutCacheReturnsFailed() async throws {
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+                rowsResult: .failure(LiteLLMClientError.malformedResponse)
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case .failed = result else {
+        throw TestFailure(description: "expected failed result")
+    }
+}
+
+func testUsesConfiguredSpendLimit() async throws {
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(spendLimitUSD: 40)),
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+                rowsResult: .success([SpendLogSummaryRow(date: try! fixedDate("2026-05-18"), spendUSD: 10)])
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "expected refreshed result")
+    }
+    try expectEqual(snapshot.limitUSD, 40, "service should use configured spend limit")
+    try expectEqual(snapshot.percentOfLimit, Decimal(string: "0.25")!, "service should compute percent from configured limit")
+}
+
 let syncTests: [(String, () throws -> Void)] = [
     ("testTestRunnerLoadsCoreTarget", testTestRunnerLoadsCoreTarget),
     ("testDecodesUserInfoSpendAndBudget", testDecodesUserInfoSpendAndBudget),
@@ -321,6 +465,13 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testMapsFullyInvalidJSONToMalformedResponse", testMapsFullyInvalidJSONToMalformedResponse),
     ("testRedactsAuthorizationHeaderFromLogs", testRedactsAuthorizationHeaderFromLogs),
     ("testFetchSpendRowsDoesNotComputeSnapshot", testFetchSpendRowsDoesNotComputeSnapshot)
+    ,
+    ("testRefreshFetchesUserThenTodaySpend", testRefreshFetchesUserThenTodaySpend),
+    ("testReturnsStaleSnapshotOnTransientAPIFailure", testReturnsStaleSnapshotOnTransientAPIFailure),
+    ("testAuthFailureReturnsAuthFailedWithoutRetrying", testAuthFailureReturnsAuthFailedWithoutRetrying),
+    ("testMissingKeyReturnsSetupRequired", testMissingKeyReturnsSetupRequired),
+    ("testMalformedResponseWithoutCacheReturnsFailed", testMalformedResponseWithoutCacheReturnsFailed),
+    ("testUsesConfiguredSpendLimit", testUsesConfiguredSpendLimit)
 ]
 
 var failures: [String] = []
