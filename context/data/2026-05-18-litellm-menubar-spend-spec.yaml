@@ -1,0 +1,192 @@
+version: 1
+name: litellm-menubar-spend
+status: draft
+owner: jw_tokens
+
+product:
+  default_display:
+    label: today
+    range: today
+    denominator_usd: 80
+    refresh_interval_seconds: 300
+    manual_refresh: true
+  supported_ranges:
+    - id: today
+      label: Today
+      start_date: local_today
+      end_date: local_tomorrow
+      inclusive_days: 1
+    - id: last7Days
+      label: Last 7 Days
+      start_date: local_today_minus_6_days
+      end_date: local_tomorrow
+      inclusive_days: 7
+    - id: last30Days
+      label: Last 30 Days
+      start_date: local_today_minus_29_days
+      end_date: local_tomorrow
+      inclusive_days: 30
+    - id: monthToDate
+      label: Month to Date
+      start_date: local_first_day_of_month
+      end_date: local_tomorrow
+    - id: yearToDate
+      label: Year to Date
+      start_date: local_january_1
+      end_date: local_tomorrow
+
+configuration:
+  base_url:
+    default: https://litellm.justworksai.net
+    storage: user_defaults
+  api_key:
+    storage: macos_keychain
+    log_policy: never_log
+  auth_header:
+    default: Authorization
+    value_format: "Bearer <api_key>"
+
+litellm_api:
+  user_info:
+    method: GET
+    path: /user/info
+    query: {}
+    response_contract:
+      user_id: string
+      user_info:
+        spend: number
+        max_budget: number_or_null
+        budget_reset_at: iso8601_or_null
+        budget_duration: string_or_null
+        user_email: string_or_null
+        user_role: string_or_null
+    app_usage:
+      - discover current user_id
+      - display account or budget-period total where needed
+      - capture budget metadata for popover context
+  spend_logs_summary:
+    method: GET
+    path: /spend/logs
+    query:
+      user_id: string
+      start_date: yyyy_mm_dd_local_date
+      end_date: yyyy_mm_dd_local_date_exclusive
+      summarize: true
+    response_contract:
+      type: array
+      items:
+        startTime: yyyy_mm_dd_date_bucket
+        spend: number_or_null
+        models: object_optional
+        users: object_optional
+    aggregation:
+      total_spend: "sum(item.spend ?? 0)"
+      daily_points: "filter start_date <= item.startTime < end_date, then group by item.startTime and sum(item.spend ?? 0)"
+      exclusive_end_date_rule: "Rows whose startTime is equal to end_date are ignored, even when the API returns a zero-spend end-date row."
+    privacy:
+      summarize_false_allowed: false
+      reason: raw logs can include request and response payload fields
+
+domain_contracts:
+  SpendRange:
+    swift_type: "enum SpendRange: String"
+    cases:
+      - today
+      - last7Days
+      - last30Days
+      - monthToDate
+      - yearToDate
+  SpendSnapshot:
+    fields:
+      range: SpendRange
+      totalSpendUSD: Decimal
+      limitUSD: Decimal
+      percentOfLimit: Decimal
+      dailyPoints: array_of_DailySpendPoint
+      refreshedAt: Date
+      isStale: Bool
+  SpendLogSummaryRow:
+    fields:
+      date: Date
+      spendUSD: Decimal
+      modelBreakdown: optional_object
+      userBreakdown: optional_object
+  SpendRefreshResult:
+    cases:
+      refreshed:
+        fields:
+          snapshot: SpendSnapshot
+      stale:
+        fields:
+          snapshot: SpendSnapshot
+          message: String
+      setupRequired:
+        fields:
+          message: String
+      authFailed:
+        fields:
+          message: String
+      failed:
+        fields:
+          message: String
+  LiteLLMClientProtocol:
+    methods:
+      fetchCurrentUser: "async throws -> LiteLLMUserContext"
+      fetchSpendRows: "fetchSpendRows(range: DateRange, userID: String) async throws -> [SpendLogSummaryRow]"
+    responsibility: "HTTP request construction, status/error mapping, and DTO decoding only."
+  SpendServicing:
+    methods:
+      refresh: "refresh(range: SpendRange, now: Date, calendar: Calendar) async -> SpendRefreshResult"
+    responsibility: "Credential lookup, user discovery, range resolution, stale-cache fallback, and aggregation."
+  SpendLimit:
+    default_usd: 80
+    formula: totalSpendUSD / limitUSD
+
+test_boundaries:
+  url_loading:
+    contract: "URLLoading.data(for:) async throws -> (Data, HTTPURLResponse)"
+    purpose: deterministic LiteLLM client tests
+  keychain_gateway:
+    contract: "KeychainGateway.copy/add/update/delete"
+    purpose: unit-test Keychain behavior without invoking real SecItem in default tests
+  logging_sink:
+    contract: "AppLogging.log(event:) accepts redacted structured events"
+    purpose: assert credentials and payloads are never logged
+  snapshot_cache:
+    contract: "SpendSnapshotCaching load/save"
+    purpose: stale value fallback on transient failures
+  app_configuration:
+    contract: "AppConfigurationStore baseURL + spendLimitUSD"
+    purpose: keep non-secret configuration separate from Keychain
+  refresh_scheduler:
+    contract: "RefreshScheduling starts/stops 300-second ticks and coalesces refreshes"
+    purpose: deterministic timer tests
+
+failure_behavior:
+  api_unreachable:
+    display: last_known_value_with_stale_indicator
+    retry: manual_or_next_interval
+  auth_failed:
+    display: setup_required_or_auth_error
+    retry: manual_after_key_update
+  malformed_response:
+    row_level: "Skip rows with missing/unparseable dates, treat null or missing spend as 0, log skipped row count without payloads."
+    full_response: "If the response is not a decodable array/object at the expected boundary, map to malformedResponse and let SpendService return stale(snapshot,message) when a cached snapshot exists or failed(message) when none exists."
+    retry: manual_or_next_interval
+  keychain_unavailable:
+    display: setup_required
+    retry: after_user_reenters_key
+
+observability:
+  log_fields:
+    - correlation_id
+    - endpoint
+    - http_status
+    - duration_ms
+    - range_id
+    - row_count
+  never_log:
+    - api_key
+    - authorization_header
+    - raw_request_payloads
+    - raw_response_payloads
