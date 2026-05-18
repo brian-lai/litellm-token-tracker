@@ -37,6 +37,24 @@ final class CapturingLogger: AppLogging, @unchecked Sendable {
     }
 }
 
+final class FakeKeychainGateway: KeychainGateway, @unchecked Sendable {
+    var storage: [String: String] = [:]
+    var savedValues: [String] = []
+
+    func read(service: String, account: String) throws -> String? {
+        storage["\(service):\(account)"]
+    }
+
+    func save(_ value: String, service: String, account: String) throws {
+        savedValues.append(value)
+        storage["\(service):\(account)"] = value
+    }
+
+    func delete(service: String, account: String) throws {
+        storage.removeValue(forKey: "\(service):\(account)")
+    }
+}
+
 func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     if !condition() {
         throw TestFailure(description: message)
@@ -245,6 +263,39 @@ func testFetchSpendRowsDoesNotComputeSnapshot() async throws {
     try expectEqual(rows.count, 3, "client should return decoded rows, not an aggregated snapshot")
 }
 
+func testSaveReadDeleteUsesGateway() throws {
+    let gateway = FakeKeychainGateway()
+    let store = KeychainAPIKeyStore(service: "svc", account: "acct", gateway: gateway)
+
+    try store.saveAPIKey("secret-token")
+    try expectEqual(try store.readAPIKey(), "secret-token", "saved key should read back through gateway")
+    try store.deleteAPIKey()
+
+    do {
+        _ = try store.readAPIKey()
+        throw TestFailure(description: "deleted key should be missing")
+    } catch APIKeyStoreError.missingKey {
+        return
+    }
+}
+
+func testMissingKeyMapsToSetupRequired() throws {
+    let store = KeychainAPIKeyStore(service: "svc", account: "acct", gateway: FakeKeychainGateway())
+
+    do {
+        _ = try store.readAPIKey()
+        throw TestFailure(description: "missing key should throw")
+    } catch APIKeyStoreError.missingKey {
+        return
+    }
+}
+
+func testDoesNotExposeKeyInErrorDescription() throws {
+    let errorDescription = APIKeyStoreError.unavailable.description
+
+    try expect(!errorDescription.contains("secret-token"), "error description should not expose API keys")
+}
+
 let syncTests: [(String, () throws -> Void)] = [
     ("testTestRunnerLoadsCoreTarget", testTestRunnerLoadsCoreTarget),
     ("testDecodesUserInfoSpendAndBudget", testDecodesUserInfoSpendAndBudget),
@@ -257,7 +308,10 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testLast7DaysIncludesTodayAndSixPriorDays", testLast7DaysIncludesTodayAndSixPriorDays),
     ("testMonthToDateStartsAtFirstOfMonth", testMonthToDateStartsAtFirstOfMonth),
     ("testSumsRowsAndComputesLimitPercent", testSumsRowsAndComputesLimitPercent),
-    ("testDropsExclusiveEndDateRowsFromDailyPoints", testDropsExclusiveEndDateRowsFromDailyPoints)
+    ("testDropsExclusiveEndDateRowsFromDailyPoints", testDropsExclusiveEndDateRowsFromDailyPoints),
+    ("testSaveReadDeleteUsesGateway", testSaveReadDeleteUsesGateway),
+    ("testMissingKeyMapsToSetupRequired", testMissingKeyMapsToSetupRequired),
+    ("testDoesNotExposeKeyInErrorDescription", testDoesNotExposeKeyInErrorDescription)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [
