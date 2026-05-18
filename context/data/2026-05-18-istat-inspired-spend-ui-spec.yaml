@@ -1,0 +1,219 @@
+version: 1
+name: istat-inspired-spend-ui
+status: ready_for_review
+owner: jw_tokens
+
+objective: >
+  Upgrade the existing LiteLLM spend menu bar app with a progress-ring menu bar
+  indicator and a simpler iStat Menus-inspired popover visual treatment.
+
+visual_reference:
+  source: user_attached_image
+  principles:
+    - compact dark translucent panel
+    - prominent circular gauge for the primary metric
+    - dense but readable labels and secondary metrics
+    - clear color-coded status without decorative clutter
+  explicitly_not_copying:
+    - full system monitor feature set
+    - multi-module tabs beyond spend tracking
+    - exact iStat branding, icons, or assets
+
+menu_bar_indicator:
+  default_metric: dollars
+  user_selectable_metric:
+    enum_name: MenuBarMetric
+    cases:
+      - dollars
+      - percent
+  ring:
+    source: menu_bar_snapshot_today_percent_of_limit
+    clamps: 0_to_1_for_ring_progress
+    over_limit_behavior: full_ring_red
+  label:
+    dollars: compact_currency_no_cents_when_possible
+    percent: rounded_integer_percent
+    setup: "Set API Key"
+    stale: same_metric_with_stale_state_in_popover
+  color_bands:
+    - id: green
+      min_inclusive: 0
+      max_exclusive: 0.5
+    - id: yellow
+      min_inclusive: 0.5
+      max_exclusive: 0.75
+    - id: orange
+      min_inclusive: 0.75
+      max_exclusive: 0.9
+    - id: red
+      min_inclusive: 0.9
+      max_exclusive: null
+  appkit_fallback:
+    allowed: true
+    trigger: SwiftUI_MenuBarExtra_cannot_render_reliable_ring_plus_label
+    preferred_contract: StatusItemRendering
+
+preferences:
+  storage: UserDefaults
+  keys:
+    menu_bar_metric: net.justworks.jw-tokens.menuBarMetric
+  defaults:
+    menu_bar_metric: dollars
+  test_boundary:
+    protocol: MenuBarPreferenceStoring
+    methods:
+      loadMetric: "loadMetric() throws -> MenuBarMetric"
+      saveMetric: "saveMetric(_ metric: MenuBarMetric) throws -> Void"
+
+snapshot_state:
+  selected_range_snapshot:
+    owner: SpendDashboardViewModel
+    source: selected_popover_range
+    changes_when: user_selects_range_or_manual_refresh_for_selected_range
+  menu_bar_snapshot:
+    owner: SpendDashboardViewModel
+    source: today_range_only
+    changes_when:
+      - initial_app_refresh
+      - automatic_5_minute_refresh
+      - manual_refresh_when_selected_range_is_today
+      - explicit_today_refresh_after_api_key_change
+    invariant: changing_popover_range_must_not_replace_menu_bar_snapshot
+  refresh_semantics:
+    initial_refresh: fetch_today_for_menu_bar_and_selected_range
+    selected_range_change: fetch_selected_range_only_unless_selected_range_is_today
+    automatic_refresh: refresh_today_menu_bar_snapshot_and_current_selected_range_if_different
+    stale_fallback: preserve_last_successful_snapshot_per_range
+    auth_failure: preserve_existing_snapshots_and_pause_automatic_refresh_until_key_changes
+
+popover:
+  style:
+    width_points: 320_to_360
+    theme: dark_panel
+    corner_radius: 8
+    section_style: un-nested_panels
+  primary_gauge:
+    metric: selected_range_snapshot_percent_of_limit
+    center_text: selected_range_total
+    subtitle: selected_range_name
+    color_bands: same_as_menu_bar_indicator
+  controls:
+    range_selector:
+      type: segmented_control
+      values:
+        - today
+        - last7Days
+        - last30Days
+        - monthToDate
+        - yearToDate
+    metric_selector:
+      type: segmented_control_or_menu
+      values:
+        - dollars
+        - percent
+    manual_refresh:
+      type: icon_or_compact_button
+  secondary_content:
+    - limit_summary
+    - last_refreshed
+    - stale_or_error_status
+    - daily_spend_chart
+    - api_key_setup_when_needed
+
+domain_contracts:
+  SpendStatusBand:
+    responsibility: map percent_of_limit_to_color_token
+    fields:
+      id: string
+      accessibleName: string
+      swiftUIColorName: string
+  RingProgressPresentation:
+    responsibility: shared menu_bar_and_popover_gauge_presentation
+    factory: "make(snapshot: SpendSnapshot?, metric: MenuBarMetric, rangeName: String, requiresSetup: Bool) -> RingProgressPresentation"
+    nil_snapshot_behavior: zero_progress_default_label_or_setup_title
+    stale_snapshot_behavior: keep_value_and_include_stale_context_in_accessibility_if_available
+    over_limit_behavior: progress_clamped_to_1_and_red_band
+    compact_currency_behavior: whole_dollars_when_possible_otherwise_two_decimal_places
+    percent_behavior: rounded_integer_percent
+    fields:
+      progress: Double
+      band: SpendStatusBand
+      label: String
+      accessibilityLabel: String
+  MenuBarSpendPresentation:
+    responsibility: menu_bar_specific_ring_label_state
+    factory: "make(menuBarSnapshot: SpendSnapshot?, requiresSetup: Bool, metric: MenuBarMetric) -> MenuBarSpendPresentation"
+    fields:
+      progress: Double
+      label: String
+      band: SpendStatusBand
+      metric: MenuBarMetric
+      setupTitle: String?
+      accessibilityLabel: String
+  SpendDashboardViewModel:
+    responsibility: owns_selected_range_snapshot_and_independent_today_menu_bar_snapshot
+    fields:
+      selectedRange: SpendRange
+      currentSnapshot: SpendSnapshot?
+      menuBarSnapshot: SpendSnapshot?
+      menuBarMetric: MenuBarMetric
+    invariant: currentSnapshot_may_change_with_selected_range_but_menuBarSnapshot_remains_today
+  SpendPopoverPresentation:
+    responsibility: popover_gauge_summary_status_and_controls
+    extension_fields:
+      primaryGauge: RingProgressPresentation
+      menuBarMetric: MenuBarMetric
+      limitText: String
+      overLimitText: String?
+  StatusItemRendering:
+    responsibility: optional_AppKit_bridge_if_MenuBarExtra_title_is_insufficient
+    methods:
+      render: "render(presentation: MenuBarSpendPresentation)"
+
+failure_behavior:
+  missing_snapshot:
+    menu_bar: zero_progress_with_default_metric_or_setup_title
+    popover: setup_or_not_refreshed_state
+  stale_snapshot:
+    menu_bar: keep_last_value
+    popover: show_stale_status_and_last_refreshed
+  over_limit:
+    menu_bar: red_full_ring_with_metric_label
+    popover: red_gauge_with_over_limit_message
+  preference_store_failure:
+    behavior: use_default_dollars_metric_and_continue
+  status_item_render_failure:
+    behavior: fall_back_to_compact_text_title
+
+observability:
+  log_fields:
+    - correlation_id
+    - ui_surface
+    - selected_range
+    - selected_metric
+    - status_band
+  never_log:
+    - api_key
+    - raw_litellm_payloads
+    - keychain_values
+
+testing_contracts:
+  executable_suite: swift run JWTokensTests
+  visual_smoke:
+    command: swift build && swift run JWTokens -- --preview-state <state>
+    preview_harness: JWTokensPreviewFixtures
+    states:
+      - normal
+      - setup
+      - stale
+      - auth_error
+      - over_limit
+      - empty_chart
+    checklist:
+      - status_item_ring_and_label_visible
+      - popover_opens
+      - gauge_first_layout_visible
+      - range_and_metric_controls_visible
+      - status_or_setup_message_matches_preview_state
+      - no_text_overlap_or_clipping
+    note: Preview fixture states must use fake in-memory spend data and no LiteLLM or Keychain calls. Screenshot automation is required if an AppKit status item bridge is introduced; otherwise a documented local visual checklist is acceptable for SwiftPM.
