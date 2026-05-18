@@ -80,8 +80,12 @@ public final class SpendDashboardViewModel {
         guard !trimmedKey.isEmpty else {
             return
         }
+        guard let apiKeyStore else {
+            errorMessage = "Unable to save LiteLLM API key"
+            return
+        }
         do {
-            try apiKeyStore?.saveAPIKey(trimmedKey)
+            try apiKeyStore.saveAPIKey(trimmedKey)
             apiKeyDraft = ""
             errorMessage = nil
             apiKeyDidChange()

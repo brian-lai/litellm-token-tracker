@@ -13,11 +13,12 @@ public final class TimerRefreshScheduler: RefreshScheduling, @unchecked Sendable
 
     public func start(every seconds: TimeInterval, operation: @escaping @Sendable () async -> Void) {
         stop()
-        let timer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: true) { _ in
+        let timer = Timer(timeInterval: seconds, repeats: true) { _ in
             Task {
                 await operation()
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
         lock.lock()
         self.timer = timer
         lock.unlock()
