@@ -564,6 +564,46 @@ func testShowsAllFiveRanges() throws {
     try expectEqual(labels, ["Today", "7D", "30D", "MTD", "YTD"], "range selector should expose all required ranges")
 }
 
+func testShowsSelectedRangeTotalAndPercent() throws {
+    let presentation = SpendPopoverPresentation.make(
+        range: .last30Days,
+        snapshot: try snapshot(range: .last30Days, total: Decimal(string: "24.25")!),
+        errorMessage: nil,
+        requiresSetup: false,
+        calendar: fixedCalendar()
+    )
+
+    try expectEqual(presentation.rangeName, "Last 30 days", "popover should label selected range")
+    try expectEqual(presentation.totalText, "$24.25", "popover should show selected range total")
+    try expectEqual(presentation.percentText, "30%", "popover should show selected range percent")
+}
+
+func testStaleSnapshotShowsTimestamp() throws {
+    let presentation = SpendPopoverPresentation.make(
+        range: .today,
+        snapshot: try snapshot(range: .today, total: 5, isStale: true),
+        errorMessage: "Showing last known spend",
+        requiresSetup: false,
+        calendar: fixedCalendar()
+    )
+
+    try expectEqual(presentation.refreshedText, "Updated 12:00 AM", "stale snapshot should still show last refresh time")
+    try expectEqual(presentation.statusText, "Showing last known spend", "stale status should be visible")
+}
+
+func testAuthErrorShowsKeyUpdateAction() throws {
+    let presentation = SpendPopoverPresentation.make(
+        range: .today,
+        snapshot: nil,
+        errorMessage: "LiteLLM API key was rejected",
+        requiresSetup: true,
+        calendar: fixedCalendar()
+    )
+
+    try expect(presentation.showsKeyUpdateAction, "auth/setup state should expose key update action")
+    try expectEqual(presentation.statusText, "LiteLLM API key was rejected", "auth error should be visible")
+}
+
 @MainActor
 func testSelectingSameRangeDoesNotRefreshAgain() async throws {
     let service = RecordingSpendService(results: [])
@@ -614,7 +654,10 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testDoesNotExposeKeyInErrorDescription", testDoesNotExposeKeyInErrorDescription),
     ("testDefaultTitleShowsTodaySpendAndLimitPercent", testDefaultTitleShowsTodaySpendAndLimitPercent),
     ("testSetupStateUsesCompactTitle", testSetupStateUsesCompactTitle),
-    ("testShowsAllFiveRanges", testShowsAllFiveRanges)
+    ("testShowsAllFiveRanges", testShowsAllFiveRanges),
+    ("testShowsSelectedRangeTotalAndPercent", testShowsSelectedRangeTotalAndPercent),
+    ("testStaleSnapshotShowsTimestamp", testStaleSnapshotShowsTimestamp),
+    ("testAuthErrorShowsKeyUpdateAction", testAuthErrorShowsKeyUpdateAction)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [

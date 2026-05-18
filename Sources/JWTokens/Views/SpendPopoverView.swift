@@ -5,14 +5,37 @@ struct SpendPopoverView: View {
     @Bindable var viewModel: SpendDashboardViewModel
 
     var body: some View {
+        let presentation = SpendPopoverPresentation.make(
+            range: viewModel.selectedRange,
+            snapshot: viewModel.currentSnapshot,
+            errorMessage: viewModel.errorMessage,
+            requiresSetup: viewModel.requiresSetup
+        )
+
         VStack(alignment: .leading, spacing: 12) {
             rangeSelector
-            Text(viewModel.menuBarTitle)
-                .font(.title3.weight(.semibold))
-            if let errorMessage = viewModel.errorMessage {
-                Text(errorMessage)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(presentation.rangeName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(presentation.totalText)
+                        .font(.title2.weight(.semibold))
+                    Text(presentation.percentText)
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                }
+                Text(presentation.refreshedText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let statusText = presentation.statusText {
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(viewModel.currentSnapshot?.isStale == true ? .orange : .secondary)
+            }
+            if presentation.showsKeyUpdateAction {
+                Button("Update API Key") {}
             }
         }
         .frame(width: 280, alignment: .leading)
