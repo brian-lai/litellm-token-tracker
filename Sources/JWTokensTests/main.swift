@@ -93,6 +93,44 @@ final class RecordingSpendService: SpendServicing, @unchecked Sendable {
     }
 }
 
+actor SuspendingSpendService: SpendServicing {
+    private var continuation: CheckedContinuation<SpendRefreshResult, Never>?
+    private(set) var callCount = 0
+
+    func refresh(range: SpendRange, now: Date, calendar: Calendar) async -> SpendRefreshResult {
+        callCount += 1
+        return await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func resume(with result: SpendRefreshResult) {
+        let continuation = continuation
+        self.continuation = nil
+        continuation?.resume(returning: result)
+    }
+}
+
+final class FakeRefreshScheduler: RefreshScheduling, @unchecked Sendable {
+    var interval: TimeInterval?
+    var operation: (@Sendable () async -> Void)?
+    var didStop = false
+
+    func start(every seconds: TimeInterval, operation: @escaping @Sendable () async -> Void) {
+        interval = seconds
+        self.operation = operation
+    }
+
+    func stop() {
+        didStop = true
+        operation = nil
+    }
+
+    func fire() async {
+        await operation?()
+    }
+}
+
 func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     if !condition() {
         throw TestFailure(description: message)
@@ -663,6 +701,67 @@ func testSetupStateDoesNotOverflowCompactTitle() async throws {
     try expect(viewModel.menuBarTitle.count <= 12, "setup menu title should stay short")
 }
 
+@MainActor
+func testFiresEveryFiveMinutes() async throws {
+    let scheduler = FakeRefreshScheduler()
+    let service = RecordingSpendService(results: [.refreshed(try snapshot())])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+    let coordinator = SpendRefreshCoordinator(viewModel: viewModel, scheduler: scheduler)
+
+    coordinator.start()
+    await scheduler.fire()
+
+    try expectEqual(scheduler.interval, 300, "refresh scheduler should use five-minute interval")
+    try expectEqual(service.requestedRanges, [.today], "scheduled fire should refresh selected range")
+}
+
+@MainActor
+func testManualRefreshCoalescesWithTimer() async throws {
+    let service = SuspendingSpendService()
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    async let first: Void = viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    while await service.callCount == 0 {
+        await Task.yield()
+    }
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar(), isAutomatic: true)
+    await service.resume(with: .refreshed(try snapshot()))
+    try await first
+
+    try expectEqual(await service.callCount, 1, "manual and timer refreshes should coalesce while one is in flight")
+}
+
+@MainActor
+func testManualRefreshUpdatesSnapshot() async throws {
+    let expected = try snapshot(total: 9)
+    let service = RecordingSpendService(results: [.refreshed(expected)])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.currentSnapshot, expected, "manual refresh should update current snapshot")
+}
+
+@MainActor
+func testAuthFailureStopsTimerRetryUntilKeyChanges() async throws {
+    let refreshed = try snapshot(total: 10)
+    let service = RecordingSpendService(results: [
+        .authFailed(message: "LiteLLM API key was rejected"),
+        .refreshed(refreshed)
+    ])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar(), isAutomatic: true)
+    try expectEqual(service.requestedRanges, [.today], "automatic refresh should pause after auth failure")
+
+    viewModel.apiKeyDidChange()
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar(), isAutomatic: true)
+
+    try expectEqual(service.requestedRanges, [.today, .today], "automatic refresh should resume after key change")
+    try expectEqual(viewModel.currentSnapshot, refreshed, "resumed refresh should update snapshot")
+}
+
 let syncTests: [(String, () throws -> Void)] = [
     ("testTestRunnerLoadsCoreTarget", testTestRunnerLoadsCoreTarget),
     ("testDecodesUserInfoSpendAndBudget", testDecodesUserInfoSpendAndBudget),
@@ -710,7 +809,11 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testAuthFailureShowsCredentialError", testAuthFailureShowsCredentialError),
     ("testSelectingSameRangeDoesNotRefreshAgain", testSelectingSameRangeDoesNotRefreshAgain),
     ("testMenuBarExtraUsesFormatterOutput", testMenuBarExtraUsesFormatterOutput),
-    ("testSetupStateDoesNotOverflowCompactTitle", testSetupStateDoesNotOverflowCompactTitle)
+    ("testSetupStateDoesNotOverflowCompactTitle", testSetupStateDoesNotOverflowCompactTitle),
+    ("testFiresEveryFiveMinutes", testFiresEveryFiveMinutes),
+    ("testManualRefreshCoalescesWithTimer", testManualRefreshCoalescesWithTimer),
+    ("testManualRefreshUpdatesSnapshot", testManualRefreshUpdatesSnapshot),
+    ("testAuthFailureStopsTimerRetryUntilKeyChanges", testAuthFailureStopsTimerRetryUntilKeyChanges)
 ]
 
 var failures: [String] = []

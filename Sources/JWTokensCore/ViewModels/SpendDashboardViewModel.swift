@@ -12,6 +12,7 @@ public final class SpendDashboardViewModel {
     public var errorMessage: String?
     public var isRefreshing = false
     public var requiresSetup = false
+    public var pausesAutomaticRefresh = false
 
     public var menuBarTitle: String {
         if requiresSetup {
@@ -26,7 +27,13 @@ public final class SpendDashboardViewModel {
         self.spendService = spendService
     }
 
-    public func refresh(now: Date = Date(), calendar: Calendar = .current) async {
+    public func refresh(now: Date = Date(), calendar: Calendar = .current, isAutomatic: Bool = false) async {
+        if isAutomatic && pausesAutomaticRefresh {
+            return
+        }
+        guard !isRefreshing else {
+            return
+        }
         isRefreshing = true
         defer { isRefreshing = false }
 
@@ -36,6 +43,7 @@ public final class SpendDashboardViewModel {
             currentSnapshot = snapshot
             errorMessage = nil
             requiresSetup = false
+            pausesAutomaticRefresh = false
         case let .stale(snapshot, message):
             currentSnapshot = snapshot
             errorMessage = message
@@ -43,6 +51,7 @@ public final class SpendDashboardViewModel {
         case let .setupRequired(message), let .authFailed(message):
             errorMessage = message
             requiresSetup = true
+            pausesAutomaticRefresh = true
         case let .failed(message):
             errorMessage = message
             requiresSetup = false
@@ -55,5 +64,10 @@ public final class SpendDashboardViewModel {
         }
         selectedRange = range
         await refresh(now: now, calendar: calendar)
+    }
+
+    public func apiKeyDidChange() {
+        pausesAutomaticRefresh = false
+        requiresSetup = false
     }
 }

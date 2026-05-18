@@ -37,6 +37,14 @@ struct SpendPopoverView: View {
             if let snapshot = viewModel.currentSnapshot {
                 DailySpendChartView(presentation: .make(points: snapshot.dailyPoints))
             }
+            Button {
+                Task {
+                    await viewModel.refresh()
+                }
+            } label: {
+                Text(viewModel.isRefreshing ? "Refreshing..." : "Refresh")
+            }
+            .disabled(viewModel.isRefreshing)
             if presentation.showsKeyUpdateAction {
                 Button("Update API Key") {}
             }
