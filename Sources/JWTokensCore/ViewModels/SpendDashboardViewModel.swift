@@ -19,6 +19,24 @@ public final class SpendDashboardViewModel {
     }
 
     public func refresh(now: Date = Date(), calendar: Calendar = .current) async {
-        errorMessage = "Not implemented"
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        let result = await spendService.refresh(range: selectedRange, now: now, calendar: calendar)
+        switch result {
+        case let .refreshed(snapshot):
+            currentSnapshot = snapshot
+            errorMessage = nil
+        case let .stale(snapshot, message):
+            currentSnapshot = snapshot
+            errorMessage = message
+        case let .setupRequired(message), let .authFailed(message), let .failed(message):
+            errorMessage = message
+        }
+    }
+
+    public func selectRange(_ range: SpendRange, now: Date = Date(), calendar: Calendar = .current) async {
+        selectedRange = range
+        await refresh(now: now, calendar: calendar)
     }
 }

@@ -79,6 +79,20 @@ struct FakeClient: LiteLLMClientProtocol {
     }
 }
 
+final class RecordingSpendService: SpendServicing, @unchecked Sendable {
+    var results: [SpendRefreshResult]
+    var requestedRanges: [SpendRange] = []
+
+    init(results: [SpendRefreshResult]) {
+        self.results = results
+    }
+
+    func refresh(range: SpendRange, now: Date, calendar: Calendar) async -> SpendRefreshResult {
+        requestedRanges.append(range)
+        return results.removeFirst()
+    }
+}
+
 func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     if !condition() {
         throw TestFailure(description: message)
@@ -472,6 +486,68 @@ func testUsesConfiguredSpendLimit() async throws {
     try expectEqual(snapshot.percentOfLimit, Decimal(string: "0.25")!, "service should compute percent from configured limit")
 }
 
+func snapshot(range: SpendRange = .today, total: Decimal = 8, isStale: Bool = false) throws -> SpendSnapshot {
+    SpendSnapshot(
+        range: range,
+        totalSpendUSD: total,
+        limitUSD: 80,
+        percentOfLimit: total / 80,
+        dailyPoints: [DailySpendPoint(date: try fixedDate("2026-05-18"), spendUSD: total)],
+        refreshedAt: try fixedDate("2026-05-18"),
+        isStale: isStale
+    )
+}
+
+@MainActor
+func testInitialRefreshLoadsTodaySnapshot() async throws {
+    let expected = try snapshot(range: .today, total: 7)
+    let service = RecordingSpendService(results: [.refreshed(expected)])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(service.requestedRanges, [.today], "initial refresh should request today's spend")
+    try expectEqual(viewModel.currentSnapshot, expected, "view model should expose refreshed snapshot")
+    try expectEqual(viewModel.errorMessage, nil, "successful refresh should clear errors")
+    try expect(!viewModel.isRefreshing, "refresh flag should reset after completion")
+}
+
+@MainActor
+func testSelectingRangeFetchesThatRange() async throws {
+    let expected = try snapshot(range: .last7Days, total: 11)
+    let service = RecordingSpendService(results: [.refreshed(expected)])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    await viewModel.selectRange(.last7Days, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.selectedRange, .last7Days, "selected range should update")
+    try expectEqual(service.requestedRanges, [.last7Days], "range selection should refresh selected range")
+    try expectEqual(viewModel.currentSnapshot, expected, "selected range snapshot should be exposed")
+}
+
+@MainActor
+func testTransientFailureKeepsStaleSnapshot() async throws {
+    let stale = try snapshot(range: .today, total: 5, isStale: true)
+    let service = RecordingSpendService(results: [.stale(stale, message: "Showing last known spend")])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.currentSnapshot, stale, "stale snapshot should remain visible")
+    try expectEqual(viewModel.errorMessage, "Showing last known spend", "stale message should be shown")
+}
+
+@MainActor
+func testAuthFailureShowsCredentialError() async throws {
+    let service = RecordingSpendService(results: [.authFailed(message: "LiteLLM API key was rejected")])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.currentSnapshot, nil, "auth failure should not invent a snapshot")
+    try expectEqual(viewModel.errorMessage, "LiteLLM API key was rejected", "auth failure should surface credential error")
+}
+
 let syncTests: [(String, () throws -> Void)] = [
     ("testTestRunnerLoadsCoreTarget", testTestRunnerLoadsCoreTarget),
     ("testDecodesUserInfoSpendAndBudget", testDecodesUserInfoSpendAndBudget),
@@ -504,7 +580,11 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testAuthFailureReturnsAuthFailedWithoutRetrying", testAuthFailureReturnsAuthFailedWithoutRetrying),
     ("testMissingKeyReturnsSetupRequired", testMissingKeyReturnsSetupRequired),
     ("testMalformedResponseWithoutCacheReturnsFailed", testMalformedResponseWithoutCacheReturnsFailed),
-    ("testUsesConfiguredSpendLimit", testUsesConfiguredSpendLimit)
+    ("testUsesConfiguredSpendLimit", testUsesConfiguredSpendLimit),
+    ("testInitialRefreshLoadsTodaySnapshot", testInitialRefreshLoadsTodaySnapshot),
+    ("testSelectingRangeFetchesThatRange", testSelectingRangeFetchesThatRange),
+    ("testTransientFailureKeepsStaleSnapshot", testTransientFailureKeepsStaleSnapshot),
+    ("testAuthFailureShowsCredentialError", testAuthFailureShowsCredentialError)
 ]
 
 var failures: [String] = []
