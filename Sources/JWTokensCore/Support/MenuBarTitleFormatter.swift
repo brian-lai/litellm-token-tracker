@@ -22,8 +22,27 @@ public enum MenuBarTitleFormatter {
         return formatter.string(from: value as NSDecimalNumber) ?? "$0.00"
     }
 
+    public static func compactCurrency(_ value: Decimal) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "USD"
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = value == value.rounded(scale: 0) ? 0 : 2
+        return formatter.string(from: value as NSDecimalNumber) ?? "$0"
+    }
+
     public static func percent(_ value: Decimal) -> String {
         let percent = (value as NSDecimalNumber).multiplying(by: 100).doubleValue
         return "\(Int(percent.rounded()))%"
+    }
+}
+
+private extension Decimal {
+    func rounded(scale: Int) -> Decimal {
+        var input = self
+        var output = Decimal()
+        NSDecimalRound(&output, &input, scale, .plain)
+        return output
     }
 }

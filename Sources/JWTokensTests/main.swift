@@ -799,6 +799,71 @@ func testSavingAPIKeyClearsSetupPause() async throws {
     try expect(!viewModel.pausesAutomaticRefresh, "saving key should resume automatic refresh")
 }
 
+func testSpendStatusBandThresholds() throws {
+    try expectEqual(SpendStatusBand.band(for: Decimal(string: "0.49")!), .green, "under 50 percent should be green")
+    try expectEqual(SpendStatusBand.band(for: Decimal(string: "0.50")!), .yellow, "50 percent should be yellow")
+    try expectEqual(SpendStatusBand.band(for: Decimal(string: "0.75")!), .orange, "75 percent should be orange")
+    try expectEqual(SpendStatusBand.band(for: Decimal(string: "0.90")!), .red, "90 percent should be red")
+}
+
+func testRingProgressClampsOverLimitSpend() throws {
+    let presentation = RingProgressPresentation.make(
+        snapshot: try snapshot(total: 120),
+        metric: .percent,
+        rangeName: "Today",
+        requiresSetup: false
+    )
+
+    try expectEqual(presentation.progress, 1, "ring progress should clamp over-limit spend")
+    try expectEqual(presentation.band, .red, "over-limit spend should be red")
+}
+
+func testRingPresentationFormatsDollarMetric() throws {
+    let presentation = RingProgressPresentation.make(
+        snapshot: try snapshot(total: Decimal(string: "33.42")!),
+        metric: .dollars,
+        rangeName: "Today",
+        requiresSetup: false
+    )
+
+    try expectEqual(presentation.label, "$33.42", "dollar metric should show compact currency")
+}
+
+func testRingPresentationFormatsPercentMetric() throws {
+    let presentation = RingProgressPresentation.make(
+        snapshot: try snapshot(total: 40),
+        metric: .percent,
+        rangeName: "Today",
+        requiresSetup: false
+    )
+
+    try expectEqual(presentation.label, "50%", "percent metric should show rounded integer percent")
+}
+
+func testRingPresentationHandlesNilSnapshot() throws {
+    let presentation = RingProgressPresentation.make(
+        snapshot: nil,
+        metric: .dollars,
+        rangeName: "Today",
+        requiresSetup: false
+    )
+
+    try expectEqual(presentation.progress, 0, "nil snapshot should show zero progress")
+    try expectEqual(presentation.label, "$0", "nil snapshot should use the selected metric zero label")
+}
+
+func testRingPresentationAccessibilityIncludesBandAndRange() throws {
+    let presentation = RingProgressPresentation.make(
+        snapshot: try snapshot(range: .today, total: 70),
+        metric: .dollars,
+        rangeName: "Today",
+        requiresSetup: false
+    )
+
+    try expect(presentation.accessibilityLabel.contains("Today"), "accessibility should include range")
+    try expect(presentation.accessibilityLabel.contains("orange band"), "accessibility should include band")
+}
+
 let syncTests: [(String, () throws -> Void)] = [
     ("testTestRunnerLoadsCoreTarget", testTestRunnerLoadsCoreTarget),
     ("testDecodesUserInfoSpendAndBudget", testDecodesUserInfoSpendAndBudget),
@@ -823,7 +888,13 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testStaleSnapshotShowsTimestamp", testStaleSnapshotShowsTimestamp),
     ("testAuthErrorShowsKeyUpdateAction", testAuthErrorShowsKeyUpdateAction),
     ("testDailyChartRendersOneBarPerPoint", testDailyChartRendersOneBarPerPoint),
-    ("testTodayChartDoesNotRenderExclusiveEndDateBar", testTodayChartDoesNotRenderExclusiveEndDateBar)
+    ("testTodayChartDoesNotRenderExclusiveEndDateBar", testTodayChartDoesNotRenderExclusiveEndDateBar),
+    ("testSpendStatusBandThresholds", testSpendStatusBandThresholds),
+    ("testRingProgressClampsOverLimitSpend", testRingProgressClampsOverLimitSpend),
+    ("testRingPresentationFormatsDollarMetric", testRingPresentationFormatsDollarMetric),
+    ("testRingPresentationFormatsPercentMetric", testRingPresentationFormatsPercentMetric),
+    ("testRingPresentationHandlesNilSnapshot", testRingPresentationHandlesNilSnapshot),
+    ("testRingPresentationAccessibilityIncludesBandAndRange", testRingPresentationAccessibilityIncludesBandAndRange)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [
