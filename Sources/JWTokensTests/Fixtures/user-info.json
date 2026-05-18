@@ -1,0 +1,12 @@
+{
+  "user_id": "4a5641d6-f56a-4657-aa55-98cb447fec95",
+  "user_info": {
+    "spend": 524.3974209499993,
+    "max_budget": 2400.0,
+    "budget_reset_at": "2026-06-01T00:00:00Z",
+    "user_email": "blai@example.com",
+    "user_role": "internal_user"
+  },
+  "keys": [],
+  "teams": []
+}

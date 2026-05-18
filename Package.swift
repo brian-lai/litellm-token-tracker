@@ -22,7 +22,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "JWTokensTests",
-            dependencies: ["JWTokensCore"]
+            dependencies: ["JWTokensCore"],
+            resources: [
+                .process("Fixtures")
+            ]
         )
     ]
 )
