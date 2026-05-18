@@ -5,6 +5,38 @@ struct TestFailure: Error, CustomStringConvertible {
     let description: String
 }
 
+final class StubURLLoader: URLLoading, @unchecked Sendable {
+    var requests: [URLRequest] = []
+    var data: Data
+    var statusCode: Int
+    var error: Error?
+
+    init(data: Data = Data(), statusCode: Int = 200, error: Error? = nil) {
+        self.data = data
+        self.statusCode = statusCode
+        self.error = error
+    }
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        requests.append(request)
+        if let error {
+            throw error
+        }
+        return (
+            data,
+            HTTPURLResponse(url: request.url!, statusCode: statusCode, httpVersion: nil, headerFields: nil)!
+        )
+    }
+}
+
+final class CapturingLogger: AppLogging, @unchecked Sendable {
+    var events: [AppLogEvent] = []
+
+    func log(_ event: AppLogEvent) {
+        events.append(event)
+    }
+}
+
 func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     if !condition() {
         throw TestFailure(description: message)
@@ -142,7 +174,78 @@ func testDropsExclusiveEndDateRowsFromDailyPoints() throws {
     try expectEqual(snapshot.dailyPoints[0].date, try fixedDate("2026-05-18"), "daily point should be the requested start date")
 }
 
-let tests: [(String, () throws -> Void)] = [
+func testUserInfoRequestUsesAuthorizationBearer() async throws {
+    let loader = StubURLLoader(data: try fixtureData("user-info.json"))
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+
+    _ = try await client.fetchCurrentUser()
+
+    try expectEqual(loader.requests.first?.value(forHTTPHeaderField: "Authorization"), "Bearer secret-token", "Authorization header should use bearer token")
+    try expectEqual(loader.requests.first?.url?.path, "/user/info", "user info request path should be correct")
+}
+
+func testSpendLogsRequestUsesSummarizeTrueAndExclusiveEndDate() async throws {
+    let loader = StubURLLoader(data: try fixtureData("spend-logs-summary.json"))
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+    let range = DateRange(startDate: try fixedDate("2026-05-18"), endDate: try fixedDate("2026-05-19"))
+
+    _ = try await client.fetchSpendRows(range: range, userID: "user-123")
+
+    let components = URLComponents(url: loader.requests.first!.url!, resolvingAgainstBaseURL: false)
+    let query = Dictionary(uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+    try expectEqual(query["user_id"], "user-123", "user_id query should be present")
+    try expectEqual(query["start_date"], "2026-05-18", "start date query should be present")
+    try expectEqual(query["end_date"], "2026-05-19", "exclusive end date query should be present")
+    try expectEqual(query["summarize"], "true", "summarize query should be true")
+}
+
+func testMapsUnauthorized() async throws {
+    let loader = StubURLLoader(data: Data(#"{"error":"no"}"#.utf8), statusCode: 401)
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+
+    do {
+        _ = try await client.fetchCurrentUser()
+        throw TestFailure(description: "401 should throw unauthorized")
+    } catch LiteLLMClientError.unauthorized {
+        return
+    }
+}
+
+func testMapsFullyInvalidJSONToMalformedResponse() async throws {
+    let loader = StubURLLoader(data: Data(#"{"not":"array"}"#.utf8), statusCode: 200)
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+    let range = DateRange(startDate: try fixedDate("2026-05-18"), endDate: try fixedDate("2026-05-19"))
+
+    do {
+        _ = try await client.fetchSpendRows(range: range, userID: "user-123")
+        throw TestFailure(description: "invalid JSON shape should throw malformedResponse")
+    } catch LiteLLMClientError.malformedResponse {
+        return
+    }
+}
+
+func testRedactsAuthorizationHeaderFromLogs() async throws {
+    let logger = CapturingLogger()
+    let loader = StubURLLoader(data: try fixtureData("user-info.json"))
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader, logger: logger)
+
+    _ = try await client.fetchCurrentUser()
+
+    try expect(!String(describing: logger.events).contains("secret-token"), "logs should not contain the API key")
+    try expect(!String(describing: logger.events).contains("Bearer"), "logs should not contain authorization header values")
+}
+
+func testFetchSpendRowsDoesNotComputeSnapshot() async throws {
+    let loader = StubURLLoader(data: try fixtureData("spend-logs-summary.json"))
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+    let range = DateRange(startDate: try fixedDate("2026-05-18"), endDate: try fixedDate("2026-05-19"))
+
+    let rows = try await client.fetchSpendRows(range: range, userID: "user-123")
+
+    try expectEqual(rows.count, 3, "client should return decoded rows, not an aggregated snapshot")
+}
+
+let syncTests: [(String, () throws -> Void)] = [
     ("testTestRunnerLoadsCoreTarget", testTestRunnerLoadsCoreTarget),
     ("testDecodesUserInfoSpendAndBudget", testDecodesUserInfoSpendAndBudget),
     ("testDecodesSummarizedSpendRows", testDecodesSummarizedSpendRows),
@@ -157,11 +260,30 @@ let tests: [(String, () throws -> Void)] = [
     ("testDropsExclusiveEndDateRowsFromDailyPoints", testDropsExclusiveEndDateRowsFromDailyPoints)
 ]
 
+let asyncTests: [(String, () async throws -> Void)] = [
+    ("testUserInfoRequestUsesAuthorizationBearer", testUserInfoRequestUsesAuthorizationBearer),
+    ("testSpendLogsRequestUsesSummarizeTrueAndExclusiveEndDate", testSpendLogsRequestUsesSummarizeTrueAndExclusiveEndDate),
+    ("testMapsUnauthorized", testMapsUnauthorized),
+    ("testMapsFullyInvalidJSONToMalformedResponse", testMapsFullyInvalidJSONToMalformedResponse),
+    ("testRedactsAuthorizationHeaderFromLogs", testRedactsAuthorizationHeaderFromLogs),
+    ("testFetchSpendRowsDoesNotComputeSnapshot", testFetchSpendRowsDoesNotComputeSnapshot)
+]
+
 var failures: [String] = []
 
-for (name, test) in tests {
+for (name, test) in syncTests {
     do {
         try test()
+        print("PASS \(name)")
+    } catch {
+        failures.append("\(name): \(error)")
+        print("FAIL \(name): \(error)")
+    }
+}
+
+for (name, test) in asyncTests {
+    do {
+        try await test()
         print("PASS \(name)")
     } catch {
         failures.append("\(name): \(error)")
