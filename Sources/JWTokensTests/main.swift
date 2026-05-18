@@ -70,6 +70,78 @@ func testFullyInvalidSpendLogsResponseMapsToMalformedResponse() throws {
     }
 }
 
+func fixedCalendar() -> Calendar {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    return calendar
+}
+
+func fixedDate(_ value: String) throws -> Date {
+    let formatter = DateFormatter()
+    formatter.calendar = fixedCalendar()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "yyyy-MM-dd"
+    guard let date = formatter.date(from: value) else {
+        throw TestFailure(description: "Invalid fixed date \(value)")
+    }
+    return date
+}
+
+func testTodayUsesTomorrowAsExclusiveEnd() throws {
+    let calendar = fixedCalendar()
+    let now = try fixedDate("2026-05-18")
+    let range = SpendRangeResolver().dateRange(for: .today, now: now, calendar: calendar)
+
+    try expectEqual(range.startDate, try fixedDate("2026-05-18"), "today starts at local start of day")
+    try expectEqual(range.endDate, try fixedDate("2026-05-19"), "today ends at tomorrow exclusive")
+}
+
+func testLast7DaysIncludesTodayAndSixPriorDays() throws {
+    let calendar = fixedCalendar()
+    let now = try fixedDate("2026-05-18")
+    let range = SpendRangeResolver().dateRange(for: .last7Days, now: now, calendar: calendar)
+
+    try expectEqual(range.startDate, try fixedDate("2026-05-12"), "last 7 days should include today plus six prior days")
+    try expectEqual(range.endDate, try fixedDate("2026-05-19"), "last 7 days should end tomorrow exclusive")
+}
+
+func testMonthToDateStartsAtFirstOfMonth() throws {
+    let calendar = fixedCalendar()
+    let now = try fixedDate("2026-05-18")
+    let range = SpendRangeResolver().dateRange(for: .monthToDate, now: now, calendar: calendar)
+
+    try expectEqual(range.startDate, try fixedDate("2026-05-01"), "month-to-date should start on first day of month")
+    try expectEqual(range.endDate, try fixedDate("2026-05-19"), "month-to-date should end tomorrow exclusive")
+}
+
+func testSumsRowsAndComputesLimitPercent() throws {
+    let dateRange = DateRange(startDate: try fixedDate("2026-05-18"), endDate: try fixedDate("2026-05-19"))
+    let rows = [
+        SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: Decimal(string: "5.25")!),
+        SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: Decimal(string: "2.75")!)
+    ]
+
+    let snapshot = SpendAggregator.snapshot(rows: rows, range: .today, dateRange: dateRange, limitUSD: 80, refreshedAt: try fixedDate("2026-05-19"))
+
+    try expectEqual(snapshot.totalSpendUSD, 8, "snapshot should sum spend rows")
+    try expectEqual(snapshot.percentOfLimit, Decimal(string: "0.1")!, "snapshot should compute total over limit")
+    try expectEqual(snapshot.dailyPoints.count, 1, "same-day rows should group into one daily point")
+}
+
+func testDropsExclusiveEndDateRowsFromDailyPoints() throws {
+    let dateRange = DateRange(startDate: try fixedDate("2026-05-18"), endDate: try fixedDate("2026-05-19"))
+    let rows = [
+        SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: 7),
+        SpendLogSummaryRow(date: try fixedDate("2026-05-19"), spendUSD: 0)
+    ]
+
+    let snapshot = SpendAggregator.snapshot(rows: rows, range: .today, dateRange: dateRange, limitUSD: 80, refreshedAt: try fixedDate("2026-05-19"))
+
+    try expectEqual(snapshot.dailyPoints.count, 1, "exclusive end date row should not become a daily chart point")
+    try expectEqual(snapshot.dailyPoints[0].date, try fixedDate("2026-05-18"), "daily point should be the requested start date")
+}
+
 let tests: [(String, () throws -> Void)] = [
     ("testTestRunnerLoadsCoreTarget", testTestRunnerLoadsCoreTarget),
     ("testDecodesUserInfoSpendAndBudget", testDecodesUserInfoSpendAndBudget),
@@ -77,6 +149,12 @@ let tests: [(String, () throws -> Void)] = [
     ("testDecodesMissingSpendAsZero", testDecodesMissingSpendAsZero),
     ("testSkipsRowsWithUnparseableDates", testSkipsRowsWithUnparseableDates),
     ("testFullyInvalidSpendLogsResponseMapsToMalformedResponse", testFullyInvalidSpendLogsResponseMapsToMalformedResponse)
+    ,
+    ("testTodayUsesTomorrowAsExclusiveEnd", testTodayUsesTomorrowAsExclusiveEnd),
+    ("testLast7DaysIncludesTodayAndSixPriorDays", testLast7DaysIncludesTodayAndSixPriorDays),
+    ("testMonthToDateStartsAtFirstOfMonth", testMonthToDateStartsAtFirstOfMonth),
+    ("testSumsRowsAndComputesLimitPercent", testSumsRowsAndComputesLimitPercent),
+    ("testDropsExclusiveEndDateRowsFromDailyPoints", testDropsExclusiveEndDateRowsFromDailyPoints)
 ]
 
 var failures: [String] = []

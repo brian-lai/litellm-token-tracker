@@ -64,6 +64,42 @@ public struct SpendSnapshot: Equatable, Sendable {
     }
 }
 
+public enum SpendAggregator {
+    public static func snapshot(
+        rows: [SpendLogSummaryRow],
+        range: SpendRange,
+        dateRange: DateRange,
+        limitUSD: Decimal,
+        refreshedAt: Date,
+        isStale: Bool = false
+    ) -> SpendSnapshot {
+        let filteredRows = rows.filter { row in
+            row.date >= dateRange.startDate && row.date < dateRange.endDate
+        }
+
+        var grouped: [Date: Decimal] = [:]
+        for row in filteredRows {
+            grouped[row.date, default: 0] += row.spendUSD
+        }
+
+        let dailyPoints = grouped
+            .map { DailySpendPoint(date: $0.key, spendUSD: $0.value) }
+            .sorted { $0.date < $1.date }
+        let total = dailyPoints.reduce(Decimal(0)) { $0 + $1.spendUSD }
+        let percent = limitUSD == 0 ? 0 : total / limitUSD
+
+        return SpendSnapshot(
+            range: range,
+            totalSpendUSD: total,
+            limitUSD: limitUSD,
+            percentOfLimit: percent,
+            dailyPoints: dailyPoints,
+            refreshedAt: refreshedAt,
+            isStale: isStale
+        )
+    }
+}
+
 public enum SpendRefreshResult: Equatable, Sendable {
     case refreshed(SpendSnapshot)
     case stale(SpendSnapshot, message: String)
@@ -100,6 +136,22 @@ public struct SpendRangeResolver: DateRangeResolving {
     public init() {}
 
     public func dateRange(for range: SpendRange, now: Date, calendar: Calendar) -> DateRange {
-        DateRange(startDate: now, endDate: now)
+        let today = calendar.startOfDay(for: now)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+
+        switch range {
+        case .today:
+            return DateRange(startDate: today, endDate: tomorrow)
+        case .last7Days:
+            return DateRange(startDate: calendar.date(byAdding: .day, value: -6, to: today)!, endDate: tomorrow)
+        case .last30Days:
+            return DateRange(startDate: calendar.date(byAdding: .day, value: -29, to: today)!, endDate: tomorrow)
+        case .monthToDate:
+            let components = calendar.dateComponents([.year, .month], from: today)
+            return DateRange(startDate: calendar.date(from: components)!, endDate: tomorrow)
+        case .yearToDate:
+            let components = calendar.dateComponents([.year], from: today)
+            return DateRange(startDate: calendar.date(from: components)!, endDate: tomorrow)
+        }
     }
 }
