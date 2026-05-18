@@ -14,17 +14,8 @@ struct JWTokensApp: App {
 
     var body: some Scene {
         MenuBarExtra(viewModel.menuBarTitle) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(viewModel.menuBarTitle)
-                    .font(.headline)
-                if let errorMessage = viewModel.errorMessage {
-                    Text(errorMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding()
-            .task {
+            SpendPopoverView(viewModel: viewModel)
+                .task {
                 await viewModel.refresh()
             }
         }

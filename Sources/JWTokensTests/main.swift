@@ -558,6 +558,22 @@ func testSetupStateUsesCompactTitle() throws {
     try expectEqual(MenuBarTitleFormatter.setupTitle(), "Set API Key", "setup title should fit in the menu bar")
 }
 
+func testShowsAllFiveRanges() throws {
+    let labels = SpendRange.allCases.map(\.displayName)
+
+    try expectEqual(labels, ["Today", "7D", "30D", "MTD", "YTD"], "range selector should expose all required ranges")
+}
+
+@MainActor
+func testSelectingSameRangeDoesNotRefreshAgain() async throws {
+    let service = RecordingSpendService(results: [])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    await viewModel.selectRange(.today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(service.requestedRanges, [], "selecting the active range should not trigger duplicate refreshes")
+}
+
 @MainActor
 func testMenuBarExtraUsesFormatterOutput() async throws {
     let service = RecordingSpendService(results: [.refreshed(try snapshot(range: .today, total: Decimal(string: "12.40")!))])
@@ -597,7 +613,8 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testMissingKeyMapsToSetupRequired", testMissingKeyMapsToSetupRequired),
     ("testDoesNotExposeKeyInErrorDescription", testDoesNotExposeKeyInErrorDescription),
     ("testDefaultTitleShowsTodaySpendAndLimitPercent", testDefaultTitleShowsTodaySpendAndLimitPercent),
-    ("testSetupStateUsesCompactTitle", testSetupStateUsesCompactTitle)
+    ("testSetupStateUsesCompactTitle", testSetupStateUsesCompactTitle),
+    ("testShowsAllFiveRanges", testShowsAllFiveRanges)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [
@@ -618,6 +635,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testSelectingRangeFetchesThatRange", testSelectingRangeFetchesThatRange),
     ("testTransientFailureKeepsStaleSnapshot", testTransientFailureKeepsStaleSnapshot),
     ("testAuthFailureShowsCredentialError", testAuthFailureShowsCredentialError),
+    ("testSelectingSameRangeDoesNotRefreshAgain", testSelectingSameRangeDoesNotRefreshAgain),
     ("testMenuBarExtraUsesFormatterOutput", testMenuBarExtraUsesFormatterOutput),
     ("testSetupStateDoesNotOverflowCompactTitle", testSetupStateDoesNotOverflowCompactTitle)
 ]

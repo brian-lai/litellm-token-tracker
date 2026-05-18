@@ -8,6 +8,21 @@ public enum SpendRange: String, CaseIterable, Identifiable, Sendable {
     case yearToDate
 
     public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .today:
+            return "Today"
+        case .last7Days:
+            return "7D"
+        case .last30Days:
+            return "30D"
+        case .monthToDate:
+            return "MTD"
+        case .yearToDate:
+            return "YTD"
+        }
+    }
 }
 
 public struct DateRange: Equatable, Sendable {

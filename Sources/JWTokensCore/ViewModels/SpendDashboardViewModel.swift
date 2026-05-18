@@ -50,6 +50,9 @@ public final class SpendDashboardViewModel {
     }
 
     public func selectRange(_ range: SpendRange, now: Date = Date(), calendar: Calendar = .current) async {
+        guard range != selectedRange else {
+            return
+        }
         selectedRange = range
         await refresh(now: now, calendar: calendar)
     }
