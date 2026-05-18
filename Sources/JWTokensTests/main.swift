@@ -558,6 +558,27 @@ func testSetupStateUsesCompactTitle() throws {
     try expectEqual(MenuBarTitleFormatter.setupTitle(), "Set API Key", "setup title should fit in the menu bar")
 }
 
+@MainActor
+func testMenuBarExtraUsesFormatterOutput() async throws {
+    let service = RecordingSpendService(results: [.refreshed(try snapshot(range: .today, total: Decimal(string: "12.40")!))])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.menuBarTitle, "$12.40 (16%)", "view model menu title should use formatter output")
+}
+
+@MainActor
+func testSetupStateDoesNotOverflowCompactTitle() async throws {
+    let service = RecordingSpendService(results: [.setupRequired(message: "LiteLLM API key is missing")])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.menuBarTitle, "Set API Key", "setup menu title should be compact")
+    try expect(viewModel.menuBarTitle.count <= 12, "setup menu title should stay short")
+}
+
 let syncTests: [(String, () throws -> Void)] = [
     ("testTestRunnerLoadsCoreTarget", testTestRunnerLoadsCoreTarget),
     ("testDecodesUserInfoSpendAndBudget", testDecodesUserInfoSpendAndBudget),
@@ -596,7 +617,9 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testInitialRefreshLoadsTodaySnapshot", testInitialRefreshLoadsTodaySnapshot),
     ("testSelectingRangeFetchesThatRange", testSelectingRangeFetchesThatRange),
     ("testTransientFailureKeepsStaleSnapshot", testTransientFailureKeepsStaleSnapshot),
-    ("testAuthFailureShowsCredentialError", testAuthFailureShowsCredentialError)
+    ("testAuthFailureShowsCredentialError", testAuthFailureShowsCredentialError),
+    ("testMenuBarExtraUsesFormatterOutput", testMenuBarExtraUsesFormatterOutput),
+    ("testSetupStateDoesNotOverflowCompactTitle", testSetupStateDoesNotOverflowCompactTitle)
 ]
 
 var failures: [String] = []

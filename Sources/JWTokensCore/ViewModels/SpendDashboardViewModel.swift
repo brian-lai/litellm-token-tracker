@@ -11,6 +11,14 @@ public final class SpendDashboardViewModel {
     public var userContext: LiteLLMUserContext?
     public var errorMessage: String?
     public var isRefreshing = false
+    public var requiresSetup = false
+
+    public var menuBarTitle: String {
+        if requiresSetup {
+            return MenuBarTitleFormatter.setupTitle()
+        }
+        return MenuBarTitleFormatter.title(for: currentSnapshot)
+    }
 
     public init(
         spendService: SpendServicing
@@ -27,11 +35,17 @@ public final class SpendDashboardViewModel {
         case let .refreshed(snapshot):
             currentSnapshot = snapshot
             errorMessage = nil
+            requiresSetup = false
         case let .stale(snapshot, message):
             currentSnapshot = snapshot
             errorMessage = message
-        case let .setupRequired(message), let .authFailed(message), let .failed(message):
+            requiresSetup = false
+        case let .setupRequired(message), let .authFailed(message):
             errorMessage = message
+            requiresSetup = true
+        case let .failed(message):
+            errorMessage = message
+            requiresSetup = false
         }
     }
 
