@@ -8,11 +8,24 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "JWTokens", targets: ["JWTokens"])
+        .library(name: "JWTokensCore", targets: ["JWTokensCore"]),
+        .executable(name: "JWTokens", targets: ["JWTokens"]),
+        .executable(name: "JWTokensTests", targets: ["JWTokensTests"])
     ],
     targets: [
+        .target(
+            name: "JWTokensCore"
+        ),
         .executableTarget(
-            name: "JWTokens"
+            name: "JWTokens",
+            dependencies: ["JWTokensCore"]
+        ),
+        .executableTarget(
+            name: "JWTokensTests",
+            dependencies: ["JWTokensCore"],
+            resources: [
+                .process("Fixtures")
+            ]
         )
     ]
 )

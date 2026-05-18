@@ -1,4 +1,5 @@
 import SwiftUI
+import JWTokensCore
 
 @main
 struct JWTokensApp: App {

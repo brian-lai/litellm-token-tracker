@@ -1,0 +1,24 @@
+[
+  {
+    "startTime": "2026-05-18",
+    "spend": 7.5715082499999955,
+    "models": {},
+    "users": {}
+  },
+  {
+    "startTime": "2026-05-19",
+    "spend": 0,
+    "models": {},
+    "users": {}
+  },
+  {
+    "startTime": "not-a-date",
+    "spend": 100
+  },
+  {
+    "spend": 42
+  },
+  {
+    "startTime": "2026-05-17"
+  }
+]
