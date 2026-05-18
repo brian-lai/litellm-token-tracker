@@ -548,6 +548,16 @@ func testAuthFailureShowsCredentialError() async throws {
     try expectEqual(viewModel.errorMessage, "LiteLLM API key was rejected", "auth failure should surface credential error")
 }
 
+func testDefaultTitleShowsTodaySpendAndLimitPercent() throws {
+    let title = MenuBarTitleFormatter.title(for: try snapshot(range: .today, total: Decimal(string: "7.57")!))
+
+    try expectEqual(title, "$7.57 (9%)", "menu bar title should show compact dollars and rounded percent")
+}
+
+func testSetupStateUsesCompactTitle() throws {
+    try expectEqual(MenuBarTitleFormatter.setupTitle(), "Set API Key", "setup title should fit in the menu bar")
+}
+
 let syncTests: [(String, () throws -> Void)] = [
     ("testTestRunnerLoadsCoreTarget", testTestRunnerLoadsCoreTarget),
     ("testDecodesUserInfoSpendAndBudget", testDecodesUserInfoSpendAndBudget),
@@ -564,7 +574,9 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testDropsExclusiveEndDateRowsFromDailyPoints", testDropsExclusiveEndDateRowsFromDailyPoints),
     ("testSaveReadDeleteUsesGateway", testSaveReadDeleteUsesGateway),
     ("testMissingKeyMapsToSetupRequired", testMissingKeyMapsToSetupRequired),
-    ("testDoesNotExposeKeyInErrorDescription", testDoesNotExposeKeyInErrorDescription)
+    ("testDoesNotExposeKeyInErrorDescription", testDoesNotExposeKeyInErrorDescription),
+    ("testDefaultTitleShowsTodaySpendAndLimitPercent", testDefaultTitleShowsTodaySpendAndLimitPercent),
+    ("testSetupStateUsesCompactTitle", testSetupStateUsesCompactTitle)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [
