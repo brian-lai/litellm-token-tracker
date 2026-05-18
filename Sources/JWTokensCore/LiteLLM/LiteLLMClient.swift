@@ -34,7 +34,9 @@ public struct LiteLLMClient: LiteLLMClientProtocol {
     public func fetchSpendRows(range: DateRange, userID: String) async throws -> [SpendLogSummaryRow] {
         let request = try makeSpendRowsRequest(range: range, userID: userID)
         let data = try await perform(request, endpoint: "/spend/logs").data
-        let result = try LiteLLMResponseDecoder.decodeSpendRows(from: data)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = range.timeZone
+        let result = try LiteLLMResponseDecoder.decodeSpendRows(from: data, calendar: calendar)
         logger.log(AppLogEvent(correlationID: correlationID(), endpoint: "/spend/logs", rowCount: result.rows.count, skippedRowCount: result.skippedRowCount))
         return result.rows
     }

@@ -81,7 +81,7 @@ public enum LiteLLMResponseDecoder {
 
         var skipped = 0
         var rows: [SpendLogSummaryRow] = []
-        let dateFormatter = DateFormatter.liteLLMDay
+        let dateFormatter = DateFormatter.liteLLMDay(timeZone: calendar.timeZone)
 
         for decodedRow in decodedRows {
             guard let startTime = decodedRow.startTime,
@@ -111,12 +111,12 @@ private extension ISO8601DateFormatter {
 }
 
 private extension DateFormatter {
-    static let liteLLMDay: DateFormatter = {
+    static func liteLLMDay(timeZone: TimeZone) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
-    }()
+    }
 }

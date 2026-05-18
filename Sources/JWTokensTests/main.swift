@@ -150,6 +150,12 @@ func fixedCalendar() -> Calendar {
     return calendar
 }
 
+func fixedCalendar(timeZone: TimeZone) -> Calendar {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = timeZone
+    return calendar
+}
+
 func fixedDate(_ value: String) throws -> Date {
     let formatter = DateFormatter()
     formatter.calendar = fixedCalendar()
@@ -160,6 +166,28 @@ func fixedDate(_ value: String) throws -> Date {
         throw TestFailure(description: "Invalid fixed date \(value)")
     }
     return date
+}
+
+func fixedDate(_ value: String, timeZone: TimeZone) throws -> Date {
+    let formatter = DateFormatter()
+    formatter.calendar = fixedCalendar(timeZone: timeZone)
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = timeZone
+    formatter.dateFormat = "yyyy-MM-dd"
+    guard let date = formatter.date(from: value) else {
+        throw TestFailure(description: "Invalid fixed date \(value)")
+    }
+    return date
+}
+
+func testDecodesSummarizedSpendRowsInRequestedTimezone() throws {
+    let timeZone = TimeZone(identifier: "America/New_York")!
+    let result = try LiteLLMResponseDecoder.decodeSpendRows(
+        from: Data(#"[{"startTime":"2026-05-18","spend":8}]"#.utf8),
+        calendar: fixedCalendar(timeZone: timeZone)
+    )
+
+    try expectEqual(result.rows.first?.date, try fixedDate("2026-05-18", timeZone: timeZone), "date-only spend rows should decode at local start of day")
 }
 
 func testTodayUsesTomorrowAsExclusiveEnd() throws {
@@ -452,6 +480,7 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testSkipsRowsWithUnparseableDates", testSkipsRowsWithUnparseableDates),
     ("testFullyInvalidSpendLogsResponseMapsToMalformedResponse", testFullyInvalidSpendLogsResponseMapsToMalformedResponse)
     ,
+    ("testDecodesSummarizedSpendRowsInRequestedTimezone", testDecodesSummarizedSpendRowsInRequestedTimezone),
     ("testTodayUsesTomorrowAsExclusiveEnd", testTodayUsesTomorrowAsExclusiveEnd),
     ("testLast7DaysIncludesTodayAndSixPriorDays", testLast7DaysIncludesTodayAndSixPriorDays),
     ("testMonthToDateStartsAtFirstOfMonth", testMonthToDateStartsAtFirstOfMonth),
