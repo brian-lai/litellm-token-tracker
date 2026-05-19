@@ -811,6 +811,39 @@ func testTodayChartDoesNotRenderExclusiveEndDateBar() throws {
     try expectEqual(presentation.bars.count, 1, "chart should not render the exclusive end date row")
 }
 
+func testDailyChartPresentationSupportsEmptyPoints() throws {
+    let presentation = DailySpendChartPresentation.make(points: [])
+
+    try expect(presentation.isEmpty, "empty chart presentation should be explicit")
+    try expectEqual(presentation.bars.count, 0, "empty chart should have no bars")
+}
+
+func testDailyChartPresentationScalesThirtyPoints() throws {
+    let points = try (0..<30).map { index in
+        DailySpendPoint(date: try fixedDate("2026-05-01").addingTimeInterval(TimeInterval(index * 86400)), spendUSD: Decimal(index + 1))
+    }
+    let presentation = DailySpendChartPresentation.make(points: points)
+
+    try expectEqual(presentation.bars.count, 30, "chart should support thirty daily points")
+    try expectEqual(presentation.bars.last?.heightRatio, 1, "largest point should scale to full height")
+}
+
+@MainActor
+func testMetricAndRangeControlsRemainIndependent() async throws {
+    let today = try snapshot(range: .today, total: 8)
+    let last30 = try snapshot(range: .last30Days, total: 30)
+    let service = RecordingSpendService(results: [.refreshed(today), .refreshed(last30)])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    viewModel.setMenuBarMetric(.percent)
+    await viewModel.selectRange(.last30Days, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.menuBarMetric, .percent, "metric control should remain independent")
+    try expectEqual(viewModel.currentSnapshot, last30, "range control should update selected snapshot")
+    try expectEqual(viewModel.menuBarSnapshot, today, "range control should not replace menu bar snapshot")
+}
+
 @MainActor
 func testSelectingSameRangeDoesNotRefreshAgain() async throws {
     let service = RecordingSpendService(results: [])
@@ -1216,6 +1249,8 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testAuthErrorShowsKeyUpdateAction", testAuthErrorShowsKeyUpdateAction),
     ("testDailyChartRendersOneBarPerPoint", testDailyChartRendersOneBarPerPoint),
     ("testTodayChartDoesNotRenderExclusiveEndDateBar", testTodayChartDoesNotRenderExclusiveEndDateBar),
+    ("testDailyChartPresentationSupportsEmptyPoints", testDailyChartPresentationSupportsEmptyPoints),
+    ("testDailyChartPresentationScalesThirtyPoints", testDailyChartPresentationScalesThirtyPoints),
     ("testSpendStatusBandThresholds", testSpendStatusBandThresholds),
     ("testRingProgressClampsOverLimitSpend", testRingProgressClampsOverLimitSpend),
     ("testRingPresentationFormatsDollarMetric", testRingPresentationFormatsDollarMetric),
@@ -1265,7 +1300,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testAuthFailurePreservesMenuBarSnapshot", testAuthFailurePreservesMenuBarSnapshot),
     ("testStaleFallbackMarksMenuBarAccessibilityStale", testStaleFallbackMarksMenuBarAccessibilityStale),
     ("testChangingMetricDoesNotRefreshSpend", testChangingMetricDoesNotRefreshSpend),
-    ("testChangingMetricUpdatesMenuBarPresentation", testChangingMetricUpdatesMenuBarPresentation)
+    ("testChangingMetricUpdatesMenuBarPresentation", testChangingMetricUpdatesMenuBarPresentation),
+    ("testMetricAndRangeControlsRemainIndependent", testMetricAndRangeControlsRemainIndependent)
 ]
 
 var failures: [String] = []

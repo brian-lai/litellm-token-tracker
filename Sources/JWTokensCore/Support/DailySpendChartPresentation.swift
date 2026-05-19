@@ -6,9 +6,11 @@ public struct DailySpendChartPresentation: Equatable, Sendable {
         public let date: Date
         public let amountText: String
         public let heightRatio: Double
+        public let band: SpendStatusBand
     }
 
     public let bars: [Bar]
+    public let isEmpty: Bool
 
     public static func make(points: [DailySpendPoint]) -> DailySpendChartPresentation {
         let maxSpend = points.map(\.spendUSD).max() ?? 0
@@ -23,9 +25,10 @@ public struct DailySpendChartPresentation: Equatable, Sendable {
                 id: point.date,
                 date: point.date,
                 amountText: MenuBarTitleFormatter.currency(point.spendUSD),
-                heightRatio: ratio
+                heightRatio: ratio,
+                band: SpendStatusBand.band(for: ratio == 0 ? 0 : Decimal(ratio))
             )
         }
-        return DailySpendChartPresentation(bars: bars)
+        return DailySpendChartPresentation(bars: bars, isEmpty: bars.isEmpty)
     }
 }
