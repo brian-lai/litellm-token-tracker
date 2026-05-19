@@ -506,6 +506,60 @@ func testMissingKeyMapsToSetupRequired() throws {
     }
 }
 
+func testLocalFileAPIKeyStoreSaveReadDelete() throws {
+    let fileURL = temporaryAPIKeyFileURL()
+    let store = LocalFileAPIKeyStore(fileURL: fileURL)
+
+    try store.saveAPIKey("secret-token\n")
+    try expectEqual(try store.readAPIKey(), "secret-token", "file store should trim surrounding newlines")
+    try store.deleteAPIKey()
+
+    do {
+        _ = try store.readAPIKey()
+        throw TestFailure(description: "deleted file key should be missing")
+    } catch APIKeyStoreError.missingKey {
+        return
+    }
+}
+
+func testLocalFileAPIKeyStoreMissingFileMapsToMissingKey() throws {
+    let store = LocalFileAPIKeyStore(fileURL: temporaryAPIKeyFileURL())
+
+    do {
+        _ = try store.readAPIKey()
+        throw TestFailure(description: "missing file should throw missingKey")
+    } catch APIKeyStoreError.missingKey {
+        return
+    }
+}
+
+func testLocalFileAPIKeyStoreUsesPrivatePermissions() throws {
+    let fileURL = temporaryAPIKeyFileURL()
+    let store = LocalFileAPIKeyStore(fileURL: fileURL)
+
+    try store.saveAPIKey("secret-token")
+
+    let directoryPermissions = try permissions(at: fileURL.deletingLastPathComponent())
+    let filePermissions = try permissions(at: fileURL)
+    try expectEqual(directoryPermissions, 0o700, "credential directory should be private")
+    try expectEqual(filePermissions, 0o600, "credential file should be private")
+}
+
+func temporaryAPIKeyFileURL() -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent("jw_tokens_tests", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        .appendingPathComponent("litellm_api_key", isDirectory: false)
+}
+
+func permissions(at url: URL) throws -> Int {
+    let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+    guard let value = attributes[.posixPermissions] as? NSNumber else {
+        throw TestFailure(description: "missing POSIX permissions for \(url.path)")
+    }
+    return value.intValue & 0o777
+}
+
 func testDoesNotExposeKeyInErrorDescription() throws {
     let errorDescription = APIKeyStoreError.unavailable.description
 
@@ -1383,6 +1437,9 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testDropsExclusiveEndDateRowsFromDailyPoints", testDropsExclusiveEndDateRowsFromDailyPoints),
     ("testSaveReadDeleteUsesGateway", testSaveReadDeleteUsesGateway),
     ("testMissingKeyMapsToSetupRequired", testMissingKeyMapsToSetupRequired),
+    ("testLocalFileAPIKeyStoreSaveReadDelete", testLocalFileAPIKeyStoreSaveReadDelete),
+    ("testLocalFileAPIKeyStoreMissingFileMapsToMissingKey", testLocalFileAPIKeyStoreMissingFileMapsToMissingKey),
+    ("testLocalFileAPIKeyStoreUsesPrivatePermissions", testLocalFileAPIKeyStoreUsesPrivatePermissions),
     ("testDoesNotExposeKeyInErrorDescription", testDoesNotExposeKeyInErrorDescription),
     ("testDefaultTitleShowsTodaySpendAndLimitPercent", testDefaultTitleShowsTodaySpendAndLimitPercent),
     ("testSetupStateUsesCompactTitle", testSetupStateUsesCompactTitle),

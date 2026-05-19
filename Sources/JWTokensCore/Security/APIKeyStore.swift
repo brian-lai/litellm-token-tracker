@@ -51,3 +51,59 @@ public struct KeychainAPIKeyStore: APIKeyStoring {
         try gateway.delete(service: service, account: account)
     }
 }
+
+public struct LocalFileAPIKeyStore: APIKeyStoring {
+    public let fileURL: URL
+
+    public init(fileURL: URL = LocalFileAPIKeyStore.defaultFileURL()) {
+        self.fileURL = fileURL
+    }
+
+    public static func defaultFileURL() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config", isDirectory: true)
+            .appendingPathComponent("jw_tokens", isDirectory: true)
+            .appendingPathComponent("litellm_api_key", isDirectory: false)
+    }
+
+    public func readAPIKey() throws -> String {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            throw APIKeyStoreError.missingKey
+        }
+        do {
+            let value = try String(contentsOf: fileURL, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else {
+                throw APIKeyStoreError.missingKey
+            }
+            return value
+        } catch let error as APIKeyStoreError {
+            throw error
+        } catch {
+            throw APIKeyStoreError.unavailable
+        }
+    }
+
+    public func saveAPIKey(_ apiKey: String) throws {
+        do {
+            let directory = fileURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try Data(apiKey.utf8).write(to: fileURL, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+        } catch {
+            throw APIKeyStoreError.unavailable
+        }
+    }
+
+    public func deleteAPIKey() throws {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return
+        }
+        do {
+            try FileManager.default.removeItem(at: fileURL)
+        } catch {
+            throw APIKeyStoreError.unavailable
+        }
+    }
+}
