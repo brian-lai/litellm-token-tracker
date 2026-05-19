@@ -1157,6 +1157,63 @@ func testPopoverPresentationIncludesMetricRows() throws {
     try expectEqual(rows["Updated"], "12:00 AM", "detail rows should include refresh time")
 }
 
+func testOverviewPresentationShowsTokenTotals() throws {
+    let analytics = SpendAnalyticsSummary(
+        totalSpendUSD: 8,
+        totals: SpendUsageTotals(
+            totalTokens: 12345,
+            promptTokens: 5000,
+            completionTokens: 7345,
+            cacheCreationTokens: 100,
+            cacheReadTokens: 200,
+            apiRequests: 7,
+            successfulRequests: 6,
+            failedRequests: 1
+        ),
+        dailyPoints: [],
+        breakdowns: [:],
+        source: .userDailyActivity
+    )
+    let snapshot = SpendSnapshot(
+        range: .today,
+        totalSpendUSD: 8,
+        limitUSD: 80,
+        percentOfLimit: Decimal(string: "0.1")!,
+        dailyPoints: [],
+        refreshedAt: try fixedDate("2026-05-18"),
+        isStale: false,
+        analytics: analytics
+    )
+    let presentation = SpendPopoverPresentation.make(range: .today, snapshot: snapshot, errorMessage: nil, requiresSetup: false, calendar: fixedCalendar())
+    let rows = Dictionary(uniqueKeysWithValues: presentation.detailRows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Tokens"], "12,345", "overview should show total token count")
+}
+
+func testOverviewPresentationShowsRequestTotals() throws {
+    let analytics = SpendAnalyticsSummary(
+        totalSpendUSD: 8,
+        totals: SpendUsageTotals(totalTokens: 0, promptTokens: 0, completionTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, apiRequests: 7, successfulRequests: 6, failedRequests: 1),
+        dailyPoints: [],
+        breakdowns: [:],
+        source: .userDailyActivity
+    )
+    let snapshot = SpendSnapshot(range: .today, totalSpendUSD: 8, limitUSD: 80, percentOfLimit: Decimal(string: "0.1")!, dailyPoints: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false, analytics: analytics)
+    let presentation = SpendPopoverPresentation.make(range: .today, snapshot: snapshot, errorMessage: nil, requiresSetup: false, calendar: fixedCalendar())
+    let rows = Dictionary(uniqueKeysWithValues: presentation.detailRows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Requests"], "7 (6 ok, 1 fail)", "overview should show request success and failure counts")
+}
+
+func testOverviewPresentationShowsDataSource() throws {
+    let analytics = SpendAnalyticsSummary(totalSpendUSD: 8, totals: .zero, dailyPoints: [], breakdowns: [:], source: .spendLogsFallback)
+    let snapshot = SpendSnapshot(range: .today, totalSpendUSD: 8, limitUSD: 80, percentOfLimit: Decimal(string: "0.1")!, dailyPoints: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false, analytics: analytics)
+    let presentation = SpendPopoverPresentation.make(range: .today, snapshot: snapshot, errorMessage: nil, requiresSetup: false, calendar: fixedCalendar())
+    let rows = Dictionary(uniqueKeysWithValues: presentation.detailRows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Source"], "Spend logs fallback", "overview should show analytics source")
+}
+
 func testPopoverPresentationShowsOverLimitState() throws {
     let presentation = SpendPopoverPresentation.make(
         range: .today,
@@ -1743,6 +1800,9 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testPopoverPresentationIncludesPrimaryGauge", testPopoverPresentationIncludesPrimaryGauge),
     ("testPopoverPresentationShowsLimitText", testPopoverPresentationShowsLimitText),
     ("testPopoverPresentationIncludesMetricRows", testPopoverPresentationIncludesMetricRows),
+    ("testOverviewPresentationShowsTokenTotals", testOverviewPresentationShowsTokenTotals),
+    ("testOverviewPresentationShowsRequestTotals", testOverviewPresentationShowsRequestTotals),
+    ("testOverviewPresentationShowsDataSource", testOverviewPresentationShowsDataSource),
     ("testPopoverPresentationShowsOverLimitState", testPopoverPresentationShowsOverLimitState),
     ("testPopoverPresentationPreservesStaleStatus", testPopoverPresentationPreservesStaleStatus),
     ("testGaugePresentationUsesBandColor", testGaugePresentationUsesBandColor),
