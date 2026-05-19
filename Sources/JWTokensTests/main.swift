@@ -82,6 +82,38 @@ final class MutableAPIKeyStore: APIKeyStoring, @unchecked Sendable {
     }
 }
 
+enum FakePreferenceError: Error {
+    case failed
+}
+
+final class FakeMenuBarPreferenceStore: MenuBarPreferenceStoring, @unchecked Sendable {
+    var metric: MenuBarMetric
+    var savedMetrics: [MenuBarMetric] = []
+    var loadError: Error?
+    var saveError: Error?
+
+    init(metric: MenuBarMetric = .dollars, loadError: Error? = nil, saveError: Error? = nil) {
+        self.metric = metric
+        self.loadError = loadError
+        self.saveError = saveError
+    }
+
+    func loadMetric() throws -> MenuBarMetric {
+        if let loadError {
+            throw loadError
+        }
+        return metric
+    }
+
+    func saveMetric(_ metric: MenuBarMetric) throws {
+        if let saveError {
+            throw saveError
+        }
+        savedMetrics.append(metric)
+        self.metric = metric
+    }
+}
+
 struct FakeClient: LiteLLMClientProtocol {
     var userResult: Result<LiteLLMUserContext, Error>
     var rowsResult: Result<[SpendLogSummaryRow], Error>
@@ -463,6 +495,7 @@ func testReturnsStaleSnapshotOnTransientAPIFailure() async throws {
         throw TestFailure(description: "expected stale result")
     }
     try expectEqual(snapshot.totalSpendUSD, 5, "service should return cached stale spend")
+    try expect(snapshot.isStale, "service should mark cached fallback snapshots stale")
 }
 
 func testAuthFailureReturnsAuthFailedWithoutRetrying() async throws {
@@ -703,7 +736,7 @@ func testMenuBarExtraUsesFormatterOutput() async throws {
 
     await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
 
-    try expectEqual(viewModel.menuBarTitle, "$12.40 (16%)", "view model menu title should use formatter output")
+    try expectEqual(viewModel.menuBarTitle, "$12.40", "view model menu title should use ring label output")
 }
 
 @MainActor
@@ -799,6 +832,265 @@ func testSavingAPIKeyClearsSetupPause() async throws {
     try expect(!viewModel.pausesAutomaticRefresh, "saving key should resume automatic refresh")
 }
 
+@MainActor
+func testViewModelLoadsMenuBarMetricPreference() async throws {
+    let preferenceStore = FakeMenuBarPreferenceStore(metric: .percent)
+    let viewModel = SpendDashboardViewModel(
+        spendService: RecordingSpendService(results: []),
+        menuBarPreferenceStore: preferenceStore
+    )
+
+    try expectEqual(viewModel.menuBarMetric, .percent, "view model should load saved menu bar metric")
+}
+
+@MainActor
+func testViewModelSavesMetricSelection() async throws {
+    let preferenceStore = FakeMenuBarPreferenceStore()
+    let viewModel = SpendDashboardViewModel(
+        spendService: RecordingSpendService(results: []),
+        menuBarPreferenceStore: preferenceStore
+    )
+
+    viewModel.setMenuBarMetric(.percent)
+
+    try expectEqual(viewModel.menuBarMetric, .percent, "view model should update in-memory menu bar metric")
+    try expectEqual(preferenceStore.savedMetrics, [.percent], "view model should persist metric changes")
+}
+
+@MainActor
+func testViewModelFallsBackWhenPreferenceLoadFails() async throws {
+    let viewModel = SpendDashboardViewModel(
+        spendService: RecordingSpendService(results: []),
+        menuBarPreferenceStore: FakeMenuBarPreferenceStore(loadError: FakePreferenceError.failed)
+    )
+
+    try expectEqual(viewModel.menuBarMetric, .dollars, "preference load failures should fall back to dollars")
+}
+
+@MainActor
+func testMenuBarPresentationRemainsTodayWhenPopoverRangeChanges() async throws {
+    let today = try snapshot(range: .today, total: 8)
+    let last7 = try snapshot(range: .last7Days, total: 20)
+    let service = RecordingSpendService(results: [.refreshed(today), .refreshed(last7)])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    await viewModel.selectRange(.last7Days, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.menuBarSnapshot, today, "menu bar snapshot should remain today's spend")
+    try expectEqual(viewModel.currentSnapshot, last7, "current snapshot should follow selected popover range")
+    try expectEqual(viewModel.menuBarPresentation.label, "$8", "menu bar presentation should still use today")
+}
+
+@MainActor
+func testAutomaticRefreshUpdatesMenuBarSnapshotAndSelectedRange() async throws {
+    let staleToday = try snapshot(range: .today, total: 8)
+    let staleLast7 = try snapshot(range: .last7Days, total: 20)
+    let freshToday = try snapshot(range: .today, total: 9)
+    let freshLast7 = try snapshot(range: .last7Days, total: 21)
+    let service = RecordingSpendService(results: [.refreshed(freshToday), .refreshed(freshLast7)])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+    viewModel.selectedRange = .last7Days
+    viewModel.menuBarSnapshot = staleToday
+    viewModel.currentSnapshot = staleLast7
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar(), isAutomatic: true)
+
+    try expectEqual(service.requestedRanges, [.today, .last7Days], "automatic refresh should update today and selected range")
+    try expectEqual(viewModel.menuBarSnapshot, freshToday, "automatic refresh should update menu bar today snapshot")
+    try expectEqual(viewModel.currentSnapshot, freshLast7, "automatic refresh should update selected range snapshot")
+}
+
+@MainActor
+func testAuthFailurePreservesMenuBarSnapshot() async throws {
+    let today = try snapshot(range: .today, total: 8)
+    let service = RecordingSpendService(results: [.authFailed(message: "LiteLLM API key was rejected")])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+    viewModel.menuBarSnapshot = today
+    viewModel.currentSnapshot = today
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.menuBarSnapshot, today, "auth failure should preserve menu bar snapshot")
+    try expectEqual(viewModel.currentSnapshot, today, "auth failure should preserve current snapshot")
+    try expect(viewModel.pausesAutomaticRefresh, "auth failure should pause automatic refresh")
+}
+
+@MainActor
+func testStaleFallbackMarksMenuBarAccessibilityStale() async throws {
+    let stale = try snapshot(range: .today, total: 5, isStale: false)
+    let cache = InMemorySpendSnapshotCache()
+    try cache.saveSnapshot(stale)
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .failure(LiteLLMClientError.unavailable),
+                rowsResult: .success([])
+            )
+        },
+        cache: cache
+    )
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expect(viewModel.menuBarSnapshot?.isStale == true, "view model should store stale-marked cached fallback")
+    try expect(viewModel.menuBarPresentation.accessibilityLabel.contains("stale"), "menu bar accessibility should disclose stale fallback")
+}
+
+func testMenuBarPresentationUsesTodaySnapshot() throws {
+    let presentation = MenuBarSpendPresentation.make(
+        menuBarSnapshot: try snapshot(range: .today, total: 12),
+        requiresSetup: false,
+        metric: .dollars
+    )
+
+    try expectEqual(presentation.label, "$12", "menu bar presentation should use today's snapshot")
+    try expectEqual(presentation.progress, 0.15, "menu bar presentation should compute progress from today's snapshot")
+}
+
+func testMenuBarPresentationUsesSetupState() throws {
+    let presentation = MenuBarSpendPresentation.make(
+        menuBarSnapshot: nil,
+        requiresSetup: true,
+        metric: .dollars
+    )
+
+    try expectEqual(presentation.label, "Set API Key", "setup state should show compact setup label")
+    try expectEqual(presentation.setupTitle, "Set API Key", "setup title should be present")
+}
+
+func testMenuBarRingAccessibilityLabelIncludesSpendAndBand() throws {
+    let presentation = MenuBarSpendPresentation.make(
+        menuBarSnapshot: try snapshot(range: .today, total: 76),
+        requiresSetup: false,
+        metric: .percent
+    )
+
+    try expect(presentation.accessibilityLabel.contains("95%"), "accessibility should include spend percent")
+    try expect(presentation.accessibilityLabel.contains("red band"), "accessibility should include band")
+}
+
+func testSpendStatusBandThresholds() throws {
+    try expectEqual(SpendStatusBand.band(for: Decimal(string: "0.49")!), .green, "under 50 percent should be green")
+    try expectEqual(SpendStatusBand.band(for: Decimal(string: "0.50")!), .yellow, "50 percent should be yellow")
+    try expectEqual(SpendStatusBand.band(for: Decimal(string: "0.75")!), .orange, "75 percent should be orange")
+    try expectEqual(SpendStatusBand.band(for: Decimal(string: "0.90")!), .red, "90 percent should be red")
+}
+
+func testRingProgressClampsOverLimitSpend() throws {
+    let presentation = RingProgressPresentation.make(
+        snapshot: try snapshot(total: 120),
+        metric: .percent,
+        rangeName: "Today",
+        requiresSetup: false
+    )
+
+    try expectEqual(presentation.progress, 1, "ring progress should clamp over-limit spend")
+    try expectEqual(presentation.band, .red, "over-limit spend should be red")
+}
+
+func testRingPresentationFormatsDollarMetric() throws {
+    let presentation = RingProgressPresentation.make(
+        snapshot: try snapshot(total: Decimal(string: "33.42")!),
+        metric: .dollars,
+        rangeName: "Today",
+        requiresSetup: false
+    )
+
+    try expectEqual(presentation.label, "$33.42", "dollar metric should show compact currency")
+}
+
+func testRingPresentationFormatsPercentMetric() throws {
+    let presentation = RingProgressPresentation.make(
+        snapshot: try snapshot(total: 40),
+        metric: .percent,
+        rangeName: "Today",
+        requiresSetup: false
+    )
+
+    try expectEqual(presentation.label, "50%", "percent metric should show rounded integer percent")
+}
+
+func testRingPresentationHandlesNilSnapshot() throws {
+    let presentation = RingProgressPresentation.make(
+        snapshot: nil,
+        metric: .dollars,
+        rangeName: "Today",
+        requiresSetup: false
+    )
+
+    try expectEqual(presentation.progress, 0, "nil snapshot should show zero progress")
+    try expectEqual(presentation.label, "$0", "nil snapshot should use the selected metric zero label")
+}
+
+func testRingPresentationAccessibilityIncludesBandAndRange() throws {
+    let presentation = RingProgressPresentation.make(
+        snapshot: try snapshot(range: .today, total: 70),
+        metric: .dollars,
+        rangeName: "Today",
+        requiresSetup: false
+    )
+
+    try expect(presentation.accessibilityLabel.contains("Today"), "accessibility should include range")
+    try expect(presentation.accessibilityLabel.contains("orange band"), "accessibility should include band")
+}
+
+func testMenuBarPreferenceDefaultsToDollars() throws {
+    let suiteName = "jw_tokens.preference.defaults.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsMenuBarPreferenceStore(defaults: defaults)
+
+    try expectEqual(try store.loadMetric(), .dollars, "missing preference should default to dollars")
+}
+
+func testMenuBarPreferencePersistsPercentMetric() throws {
+    let suiteName = "jw_tokens.preference.percent.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsMenuBarPreferenceStore(defaults: defaults)
+
+    try store.saveMetric(.percent)
+
+    try expectEqual(try store.loadMetric(), .percent, "saved metric should load back from UserDefaults")
+}
+
+func testMenuBarPreferenceFallsBackOnInvalidRawValue() throws {
+    let suiteName = "jw_tokens.preference.invalid.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defaults.set("invalid", forKey: UserDefaultsMenuBarPreferenceStore.metricKey)
+    let store = UserDefaultsMenuBarPreferenceStore(defaults: defaults)
+
+    try expectEqual(try store.loadMetric(), .dollars, "invalid preference should fall back to dollars")
+}
+
+func testMetricSelectorShowsDollarsAndPercentOptions() throws {
+    try expectEqual(MenuBarMetric.allCases.map(\.displayName), ["Dollars", "Percent"], "metric selector should expose dollars and percent")
+}
+
+@MainActor
+func testChangingMetricDoesNotRefreshSpend() async throws {
+    let service = RecordingSpendService(results: [])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    viewModel.setMenuBarMetric(.percent)
+
+    try expectEqual(service.requestedRanges, [], "changing display metric should not refresh spend")
+}
+
+@MainActor
+func testChangingMetricUpdatesMenuBarPresentation() async throws {
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []))
+    viewModel.menuBarSnapshot = try snapshot(range: .today, total: 40)
+
+    viewModel.setMenuBarMetric(.percent)
+
+    try expectEqual(viewModel.menuBarPresentation.label, "50%", "changing metric should update menu bar presentation")
+}
+
 let syncTests: [(String, () throws -> Void)] = [
     ("testTestRunnerLoadsCoreTarget", testTestRunnerLoadsCoreTarget),
     ("testDecodesUserInfoSpendAndBudget", testDecodesUserInfoSpendAndBudget),
@@ -823,7 +1115,20 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testStaleSnapshotShowsTimestamp", testStaleSnapshotShowsTimestamp),
     ("testAuthErrorShowsKeyUpdateAction", testAuthErrorShowsKeyUpdateAction),
     ("testDailyChartRendersOneBarPerPoint", testDailyChartRendersOneBarPerPoint),
-    ("testTodayChartDoesNotRenderExclusiveEndDateBar", testTodayChartDoesNotRenderExclusiveEndDateBar)
+    ("testTodayChartDoesNotRenderExclusiveEndDateBar", testTodayChartDoesNotRenderExclusiveEndDateBar),
+    ("testSpendStatusBandThresholds", testSpendStatusBandThresholds),
+    ("testRingProgressClampsOverLimitSpend", testRingProgressClampsOverLimitSpend),
+    ("testRingPresentationFormatsDollarMetric", testRingPresentationFormatsDollarMetric),
+    ("testRingPresentationFormatsPercentMetric", testRingPresentationFormatsPercentMetric),
+    ("testRingPresentationHandlesNilSnapshot", testRingPresentationHandlesNilSnapshot),
+    ("testRingPresentationAccessibilityIncludesBandAndRange", testRingPresentationAccessibilityIncludesBandAndRange),
+    ("testMenuBarPresentationUsesTodaySnapshot", testMenuBarPresentationUsesTodaySnapshot),
+    ("testMenuBarPresentationUsesSetupState", testMenuBarPresentationUsesSetupState),
+    ("testMenuBarRingAccessibilityLabelIncludesSpendAndBand", testMenuBarRingAccessibilityLabelIncludesSpendAndBand),
+    ("testMenuBarPreferenceDefaultsToDollars", testMenuBarPreferenceDefaultsToDollars),
+    ("testMenuBarPreferencePersistsPercentMetric", testMenuBarPreferencePersistsPercentMetric),
+    ("testMenuBarPreferenceFallsBackOnInvalidRawValue", testMenuBarPreferenceFallsBackOnInvalidRawValue),
+    ("testMetricSelectorShowsDollarsAndPercentOptions", testMetricSelectorShowsDollarsAndPercentOptions)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [
@@ -851,7 +1156,16 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testManualRefreshCoalescesWithTimer", testManualRefreshCoalescesWithTimer),
     ("testManualRefreshUpdatesSnapshot", testManualRefreshUpdatesSnapshot),
     ("testAuthFailureStopsTimerRetryUntilKeyChanges", testAuthFailureStopsTimerRetryUntilKeyChanges),
-    ("testSavingAPIKeyClearsSetupPause", testSavingAPIKeyClearsSetupPause)
+    ("testSavingAPIKeyClearsSetupPause", testSavingAPIKeyClearsSetupPause),
+    ("testViewModelLoadsMenuBarMetricPreference", testViewModelLoadsMenuBarMetricPreference),
+    ("testViewModelSavesMetricSelection", testViewModelSavesMetricSelection),
+    ("testViewModelFallsBackWhenPreferenceLoadFails", testViewModelFallsBackWhenPreferenceLoadFails),
+    ("testMenuBarPresentationRemainsTodayWhenPopoverRangeChanges", testMenuBarPresentationRemainsTodayWhenPopoverRangeChanges),
+    ("testAutomaticRefreshUpdatesMenuBarSnapshotAndSelectedRange", testAutomaticRefreshUpdatesMenuBarSnapshotAndSelectedRange),
+    ("testAuthFailurePreservesMenuBarSnapshot", testAuthFailurePreservesMenuBarSnapshot),
+    ("testStaleFallbackMarksMenuBarAccessibilityStale", testStaleFallbackMarksMenuBarAccessibilityStale),
+    ("testChangingMetricDoesNotRefreshSpend", testChangingMetricDoesNotRefreshSpend),
+    ("testChangingMetricUpdatesMenuBarPresentation", testChangingMetricUpdatesMenuBarPresentation)
 ]
 
 var failures: [String] = []

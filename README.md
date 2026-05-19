@@ -11,6 +11,15 @@ swift build
 swift run JWTokens
 ```
 
+The menu bar indicator shows a small progress ring plus the selected label:
+
+- Green: under 50% of the `$80` limit
+- Yellow: 50-74%
+- Orange: 75-89%
+- Red: 90% and above
+
+Use the popover's `Dollars` / `Percent` control to choose the menu bar label. The ring always represents today's spend, even when the popover range is set to 7D, 30D, MTD, or YTD.
+
 Run the local test suite:
 
 ```bash
@@ -35,6 +44,22 @@ security add-generic-password \
 ```
 
 The default LiteLLM base URL is `https://litellm.justworksai.net`, and the default spend limit is `$80`.
+
+## Visual Smoke States
+
+Preview states avoid LiteLLM and Keychain calls:
+
+```bash
+swift run JWTokens -- --preview-state normal
+swift run JWTokens -- --preview-state setup
+swift run JWTokens -- --preview-state stale
+swift run JWTokens -- --preview-state auth_error
+swift run JWTokens -- --preview-state over_limit
+swift run JWTokens -- --preview-state empty_chart
+swift run JWTokens -- --preview-state normal --preview-metric percent
+```
+
+Checklist: status item ring and label are visible, the popover opens, the accessibility label describes spend and band, and switching dollars/percent does not clip or jitter.
 
 ## Phase 1 Smoke Test
 

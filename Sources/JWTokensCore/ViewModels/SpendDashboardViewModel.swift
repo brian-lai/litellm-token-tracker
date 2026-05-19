@@ -6,29 +6,40 @@ import Observation
 public final class SpendDashboardViewModel {
     private let spendService: SpendServicing
     private let apiKeyStore: APIKeyStoring?
+    private let menuBarPreferenceStore: MenuBarPreferenceStoring?
 
     public var selectedRange: SpendRange = .today
     public var currentSnapshot: SpendSnapshot?
+    public var menuBarSnapshot: SpendSnapshot?
     public var userContext: LiteLLMUserContext?
     public var errorMessage: String?
     public var isRefreshing = false
     public var requiresSetup = false
     public var pausesAutomaticRefresh = false
     public var apiKeyDraft = ""
+    public var menuBarMetric: MenuBarMetric
 
     public var menuBarTitle: String {
-        if requiresSetup {
-            return MenuBarTitleFormatter.setupTitle()
-        }
-        return MenuBarTitleFormatter.title(for: currentSnapshot)
+        menuBarPresentation.label
+    }
+
+    public var menuBarPresentation: MenuBarSpendPresentation {
+        MenuBarSpendPresentation.make(
+            menuBarSnapshot: menuBarSnapshot,
+            requiresSetup: requiresSetup,
+            metric: menuBarMetric
+        )
     }
 
     public init(
         spendService: SpendServicing,
-        apiKeyStore: APIKeyStoring? = nil
+        apiKeyStore: APIKeyStoring? = nil,
+        menuBarPreferenceStore: MenuBarPreferenceStoring? = nil
     ) {
         self.spendService = spendService
         self.apiKeyStore = apiKeyStore
+        self.menuBarPreferenceStore = menuBarPreferenceStore
+        self.menuBarMetric = (try? menuBarPreferenceStore?.loadMetric()) ?? .dollars
     }
 
     public func refresh(now: Date = Date(), calendar: Calendar = .current, isAutomatic: Bool = false) async {
@@ -41,24 +52,18 @@ public final class SpendDashboardViewModel {
         isRefreshing = true
         defer { isRefreshing = false }
 
-        let result = await spendService.refresh(range: selectedRange, now: now, calendar: calendar)
-        switch result {
-        case let .refreshed(snapshot):
-            currentSnapshot = snapshot
-            errorMessage = nil
-            requiresSetup = false
-            pausesAutomaticRefresh = false
-        case let .stale(snapshot, message):
-            currentSnapshot = snapshot
-            errorMessage = message
-            requiresSetup = false
-        case let .setupRequired(message), let .authFailed(message):
-            errorMessage = message
-            requiresSetup = true
-            pausesAutomaticRefresh = true
-        case let .failed(message):
-            errorMessage = message
-            requiresSetup = false
+        if isAutomatic && selectedRange != .today {
+            let todayResult = await spendService.refresh(range: .today, now: now, calendar: calendar)
+            apply(todayResult, toMenuBarSnapshot: true, toCurrentSnapshot: false)
+            if pausesAutomaticRefresh {
+                return
+            }
+            let selectedResult = await spendService.refresh(range: selectedRange, now: now, calendar: calendar)
+            apply(selectedResult, toMenuBarSnapshot: false, toCurrentSnapshot: true)
+        } else {
+            let result = await spendService.refresh(range: selectedRange, now: now, calendar: calendar)
+            let isToday = selectedRange == .today
+            apply(result, toMenuBarSnapshot: isToday, toCurrentSnapshot: true)
         }
     }
 
@@ -68,6 +73,15 @@ public final class SpendDashboardViewModel {
         }
         selectedRange = range
         await refresh(now: now, calendar: calendar)
+    }
+
+    public func setMenuBarMetric(_ metric: MenuBarMetric) {
+        menuBarMetric = metric
+        do {
+            try menuBarPreferenceStore?.saveMetric(metric)
+        } catch {
+            errorMessage = "Unable to save menu bar preference"
+        }
     }
 
     public func apiKeyDidChange() {
@@ -91,6 +105,37 @@ public final class SpendDashboardViewModel {
             apiKeyDidChange()
         } catch {
             errorMessage = "Unable to save LiteLLM API key"
+        }
+    }
+
+    private func apply(_ result: SpendRefreshResult, toMenuBarSnapshot: Bool, toCurrentSnapshot: Bool) {
+        switch result {
+        case let .refreshed(snapshot):
+            if toCurrentSnapshot {
+                currentSnapshot = snapshot
+            }
+            if toMenuBarSnapshot {
+                menuBarSnapshot = snapshot
+            }
+            errorMessage = nil
+            requiresSetup = false
+            pausesAutomaticRefresh = false
+        case let .stale(snapshot, message):
+            if toCurrentSnapshot {
+                currentSnapshot = snapshot
+            }
+            if toMenuBarSnapshot {
+                menuBarSnapshot = snapshot
+            }
+            errorMessage = message
+            requiresSetup = false
+        case let .setupRequired(message), let .authFailed(message):
+            errorMessage = message
+            requiresSetup = true
+            pausesAutomaticRefresh = true
+        case let .failed(message):
+            errorMessage = message
+            requiresSetup = false
         }
     }
 }
