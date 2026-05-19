@@ -27,8 +27,9 @@ public enum MenuBarTitleFormatter {
         formatter.locale = Locale(identifier: "en_US")
         formatter.numberStyle = .currency
         formatter.currencyCode = "USD"
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = value == value.rounded(scale: 0) ? 0 : 2
+        let isWholeDollar = value == value.rounded(scale: 0)
+        formatter.minimumFractionDigits = isWholeDollar ? 0 : 2
+        formatter.maximumFractionDigits = isWholeDollar ? 0 : 2
         return formatter.string(from: value as NSDecimalNumber) ?? "$0"
     }
 
