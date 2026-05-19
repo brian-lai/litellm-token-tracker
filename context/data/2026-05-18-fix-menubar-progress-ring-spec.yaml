@@ -1,0 +1,26 @@
+name: fix-menubar-progress-ring
+date: 2026-05-18
+scope:
+  - Replace unreliable SwiftUI MenuBarExtra label rendering with an AppKit status item.
+  - Draw a real color-coded progress ring image next to the dollars/percent title.
+  - Keep the existing SwiftUI popover and refresh behavior.
+contracts:
+  status_item:
+    renderer: NSStatusItem
+    input: MenuBarSpendPresentation
+    output:
+      image: 14x14 non-template ring with track and progress arc
+      title: selected dollars or percent label
+      tooltip: accessibility label
+  popover:
+    content: SpendPopoverView
+    behavior: transient
+  refresh:
+    startup: start SpendRefreshCoordinator and perform one refresh
+    updates: observe view model presentation changes and redraw status item
+tests:
+  - swift build
+  - swift run JWTokensTests
+manual_visual_check:
+  - Menu bar shows a colored progress ring plus selected dollars or percent text.
+  - Clicking the item opens the existing spend popover.
