@@ -22,7 +22,7 @@ struct MenuBarRingLabelView: View {
             Text(presentation.label)
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .monospacedDigit()
-                .frame(width: 42, alignment: .leading)
+                .frame(width: presentation.setupTitle == nil ? 42 : 72, alignment: .leading)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
         }
