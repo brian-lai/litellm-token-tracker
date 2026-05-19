@@ -61,7 +61,7 @@ struct SpendPopoverView: View {
             case .trends:
                 TrendView(presentation: .make(analytics: viewModel.currentAnalyticsSummary))
             case .breakdown:
-                EmptyView()
+                BreakdownView(presentation: .make(analytics: viewModel.currentAnalyticsSummary))
             }
             Button {
                 Task {

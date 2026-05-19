@@ -1399,6 +1399,51 @@ func testTrendPresentationHandlesEmptyActivity() throws {
     try expectEqual(presentation.accessibilityLabel, "Spend trend, no daily activity", "empty trend should have accessible summary")
 }
 
+func testModelBreakdownSortsBySpendDescending() throws {
+    let analytics = SpendAnalyticsSummary(
+        totalSpendUSD: 10,
+        totals: .zero,
+        dailyPoints: [],
+        breakdowns: [.models: [
+            SpendBreakdownItem(label: "small-model", spendUSD: 2, tokens: 100, requests: 1),
+            SpendBreakdownItem(label: "large-model", spendUSD: 8, tokens: 400, requests: 2)
+        ]],
+        source: .userDailyActivity
+    )
+
+    let presentation = BreakdownPresentation.make(analytics: analytics)
+
+    try expectEqual(presentation.rows.map(\.label), ["large-model", "small-model"], "model breakdown should sort by spend descending")
+}
+
+func testModelBreakdownComputesPercentOfTotal() throws {
+    let analytics = SpendAnalyticsSummary(
+        totalSpendUSD: 10,
+        totals: .zero,
+        dailyPoints: [],
+        breakdowns: [.models: [
+            SpendBreakdownItem(label: "large-model", spendUSD: 8, tokens: 400, requests: 2),
+            SpendBreakdownItem(label: "small-model", spendUSD: 2, tokens: 100, requests: 1)
+        ]],
+        source: .userDailyActivity
+    )
+
+    let presentation = BreakdownPresentation.make(analytics: analytics)
+
+    try expectEqual(presentation.rows.first?.percentText, "80%", "breakdown percent should be presentation-derived")
+    try expectEqual(presentation.rows.first?.share, 0.8, "breakdown share should be selected breakdown total fraction")
+    try expectEqual(presentation.rows.first?.tokenText, "400 tokens", "breakdown should show optional tokens")
+    try expectEqual(presentation.rows.first?.requestText, "2 requests", "breakdown should show optional requests")
+}
+
+func testModelBreakdownShowsEmptyStateWhenUnavailable() throws {
+    let analytics = SpendAnalyticsSummary(totalSpendUSD: 0, totals: .zero, dailyPoints: [], breakdowns: [:], source: .spendLogsFallback)
+    let presentation = BreakdownPresentation.make(analytics: analytics)
+
+    try expect(presentation.isEmpty, "missing model breakdown should show empty state")
+    try expectEqual(presentation.emptyText, "No model breakdown available", "empty breakdown should be clear")
+}
+
 @MainActor
 func testMetricAndRangeControlsRemainIndependent() async throws {
     let today = try snapshot(range: .today, total: 8)
@@ -1864,6 +1909,9 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testTrendPresentationIncludesDailySpendAndTokens", testTrendPresentationIncludesDailySpendAndTokens),
     ("testTrendPresentationScalesLongRanges", testTrendPresentationScalesLongRanges),
     ("testTrendPresentationHandlesEmptyActivity", testTrendPresentationHandlesEmptyActivity),
+    ("testModelBreakdownSortsBySpendDescending", testModelBreakdownSortsBySpendDescending),
+    ("testModelBreakdownComputesPercentOfTotal", testModelBreakdownComputesPercentOfTotal),
+    ("testModelBreakdownShowsEmptyStateWhenUnavailable", testModelBreakdownShowsEmptyStateWhenUnavailable),
     ("testSpendStatusBandThresholds", testSpendStatusBandThresholds),
     ("testRingProgressClampsOverLimitSpend", testRingProgressClampsOverLimitSpend),
     ("testRingPresentationFormatsDollarMetric", testRingPresentationFormatsDollarMetric),
