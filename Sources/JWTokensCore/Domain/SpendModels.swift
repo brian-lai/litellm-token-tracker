@@ -71,6 +71,121 @@ public struct SpendActivitySummary: Equatable, Sendable {
     }
 }
 
+public struct SpendUsageTotals: Equatable, Sendable {
+    public static let zero = SpendUsageTotals(
+        totalTokens: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        apiRequests: 0,
+        successfulRequests: 0,
+        failedRequests: 0
+    )
+
+    public let totalTokens: Int
+    public let promptTokens: Int
+    public let completionTokens: Int
+    public let cacheCreationTokens: Int
+    public let cacheReadTokens: Int
+    public let apiRequests: Int
+    public let successfulRequests: Int
+    public let failedRequests: Int
+
+    public init(
+        totalTokens: Int,
+        promptTokens: Int,
+        completionTokens: Int,
+        cacheCreationTokens: Int,
+        cacheReadTokens: Int,
+        apiRequests: Int,
+        successfulRequests: Int,
+        failedRequests: Int
+    ) {
+        self.totalTokens = totalTokens
+        self.promptTokens = promptTokens
+        self.completionTokens = completionTokens
+        self.cacheCreationTokens = cacheCreationTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.apiRequests = apiRequests
+        self.successfulRequests = successfulRequests
+        self.failedRequests = failedRequests
+    }
+}
+
+public struct DailyActivityPoint: Equatable, Identifiable, Sendable {
+    public let date: Date
+    public let spendUSD: Decimal
+    public let totals: SpendUsageTotals
+
+    public var id: Date { date }
+
+    public init(date: Date, spendUSD: Decimal, totals: SpendUsageTotals) {
+        self.date = date
+        self.spendUSD = spendUSD
+        self.totals = totals
+    }
+
+    public var spendPoint: DailySpendPoint {
+        DailySpendPoint(date: date, spendUSD: spendUSD)
+    }
+}
+
+public enum SpendBreakdownCategory: String, CaseIterable, Sendable {
+    case models
+    case providers
+    case modelGroups
+    case endpoints
+    case mcpServers
+    case apiKeys
+}
+
+public struct SpendBreakdownItem: Equatable, Sendable {
+    public let label: String
+    public let spendUSD: Decimal
+    public let tokens: Int?
+    public let requests: Int?
+
+    public init(label: String, spendUSD: Decimal, tokens: Int?, requests: Int?) {
+        self.label = label
+        self.spendUSD = spendUSD
+        self.tokens = tokens
+        self.requests = requests
+    }
+}
+
+public enum SpendDataSource: String, Equatable, Sendable {
+    case userDailyActivity
+    case spendLogsFallback
+    case staleCache
+}
+
+public struct SpendAnalyticsSummary: Equatable, Sendable {
+    public let totalSpendUSD: Decimal
+    public let totals: SpendUsageTotals
+    public let dailyPoints: [DailyActivityPoint]
+    public let breakdowns: [SpendBreakdownCategory: [SpendBreakdownItem]]
+    public let source: SpendDataSource
+
+    public init(
+        totalSpendUSD: Decimal,
+        totals: SpendUsageTotals,
+        dailyPoints: [DailyActivityPoint],
+        breakdowns: [SpendBreakdownCategory: [SpendBreakdownItem]],
+        source: SpendDataSource
+    ) {
+        self.totalSpendUSD = totalSpendUSD
+        self.totals = totals
+        self.dailyPoints = dailyPoints
+        self.breakdowns = breakdowns
+        self.source = source
+    }
+
+    public var activitySummary: SpendActivitySummary {
+        SpendActivitySummary(totalSpendUSD: totalSpendUSD, dailyPoints: dailyPoints.map(\.spendPoint))
+    }
+}
+
 public struct SpendSnapshot: Equatable, Sendable {
     public let range: SpendRange
     public let totalSpendUSD: Decimal

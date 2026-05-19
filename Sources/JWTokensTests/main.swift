@@ -272,6 +272,54 @@ func testUserDailyActivityFallbackSumsRowsWhenMetadataTotalIsMissing() throws {
     try expectEqual(result.summary.totalSpendUSD, Decimal(string: "5.5")!, "decoder should sum activity rows when metadata total is absent")
 }
 
+func testAnalyticsSummaryStoresUsageTotals() throws {
+    let totals = SpendUsageTotals(
+        totalTokens: 30,
+        promptTokens: 10,
+        completionTokens: 20,
+        cacheCreationTokens: 4,
+        cacheReadTokens: 5,
+        apiRequests: 3,
+        successfulRequests: 2,
+        failedRequests: 1
+    )
+    let summary = SpendAnalyticsSummary(
+        totalSpendUSD: Decimal(string: "12.34")!,
+        totals: totals,
+        dailyPoints: [
+            DailyActivityPoint(date: try fixedDate("2026-05-18"), spendUSD: 12, totals: totals)
+        ],
+        breakdowns: [:],
+        source: .userDailyActivity
+    )
+
+    try expectEqual(summary.totalSpendUSD, Decimal(string: "12.34")!, "analytics summary should store total spend")
+    try expectEqual(summary.totals.totalTokens, 30, "analytics summary should store total tokens")
+    try expectEqual(summary.totals.failedRequests, 1, "analytics summary should store failed requests")
+    try expectEqual(summary.dailyPoints.first?.totals.promptTokens, 10, "daily activity points should carry usage totals")
+}
+
+func testAnalyticsSummaryStoresBreakdownItemsWithoutPresentationPercents() throws {
+    let item = SpendBreakdownItem(label: "claude-sonnet", spendUSD: Decimal(string: "9.25")!, tokens: 1000, requests: 4)
+    let summary = SpendAnalyticsSummary(
+        totalSpendUSD: Decimal(string: "9.25")!,
+        totals: .zero,
+        dailyPoints: [],
+        breakdowns: [.models: [item]],
+        source: .userDailyActivity
+    )
+
+    try expectEqual(summary.breakdowns[.models], [item], "analytics summary should store model breakdown items")
+    try expectEqual(summary.breakdowns[.models]?.first?.tokens, 1000, "breakdown items should store optional tokens")
+    try expectEqual(summary.breakdowns[.models]?.first?.requests, 4, "breakdown items should store optional requests")
+}
+
+func testSpendDataSourceCasesAreStable() throws {
+    try expectEqual(SpendDataSource.userDailyActivity.rawValue, "userDailyActivity", "activity source raw value should be stable")
+    try expectEqual(SpendDataSource.spendLogsFallback.rawValue, "spendLogsFallback", "fallback source raw value should be stable")
+    try expectEqual(SpendDataSource.staleCache.rawValue, "staleCache", "stale source raw value should be stable")
+}
+
 func fixedCalendar() -> Calendar {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -1429,6 +1477,9 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testFullyInvalidSpendLogsResponseMapsToMalformedResponse", testFullyInvalidSpendLogsResponseMapsToMalformedResponse),
     ("testDecodesUserDailyActivitySummary", testDecodesUserDailyActivitySummary),
     ("testUserDailyActivityFallbackSumsRowsWhenMetadataTotalIsMissing", testUserDailyActivityFallbackSumsRowsWhenMetadataTotalIsMissing),
+    ("testAnalyticsSummaryStoresUsageTotals", testAnalyticsSummaryStoresUsageTotals),
+    ("testAnalyticsSummaryStoresBreakdownItemsWithoutPresentationPercents", testAnalyticsSummaryStoresBreakdownItemsWithoutPresentationPercents),
+    ("testSpendDataSourceCasesAreStable", testSpendDataSourceCasesAreStable),
     ("testDecodesSummarizedSpendRowsInRequestedTimezone", testDecodesSummarizedSpendRowsInRequestedTimezone),
     ("testTodayUsesTomorrowAsExclusiveEnd", testTodayUsesTomorrowAsExclusiveEnd),
     ("testLast7DaysIncludesTodayAndSixPriorDays", testLast7DaysIncludesTodayAndSixPriorDays),
