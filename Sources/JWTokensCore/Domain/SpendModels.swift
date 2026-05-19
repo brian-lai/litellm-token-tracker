@@ -71,6 +71,131 @@ public struct SpendActivitySummary: Equatable, Sendable {
     }
 }
 
+public struct SpendUsageTotals: Equatable, Sendable {
+    public static let zero = SpendUsageTotals(
+        totalTokens: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        apiRequests: 0,
+        successfulRequests: 0,
+        failedRequests: 0
+    )
+
+    public let totalTokens: Int
+    public let promptTokens: Int
+    public let completionTokens: Int
+    public let cacheCreationTokens: Int
+    public let cacheReadTokens: Int
+    public let apiRequests: Int
+    public let successfulRequests: Int
+    public let failedRequests: Int
+
+    public init(
+        totalTokens: Int,
+        promptTokens: Int,
+        completionTokens: Int,
+        cacheCreationTokens: Int,
+        cacheReadTokens: Int,
+        apiRequests: Int,
+        successfulRequests: Int,
+        failedRequests: Int
+    ) {
+        self.totalTokens = totalTokens
+        self.promptTokens = promptTokens
+        self.completionTokens = completionTokens
+        self.cacheCreationTokens = cacheCreationTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.apiRequests = apiRequests
+        self.successfulRequests = successfulRequests
+        self.failedRequests = failedRequests
+    }
+}
+
+public struct DailyActivityPoint: Equatable, Identifiable, Sendable {
+    public let date: Date
+    public let spendUSD: Decimal
+    public let totals: SpendUsageTotals
+
+    public var id: Date { date }
+
+    public init(date: Date, spendUSD: Decimal, totals: SpendUsageTotals) {
+        self.date = date
+        self.spendUSD = spendUSD
+        self.totals = totals
+    }
+
+    public var spendPoint: DailySpendPoint {
+        DailySpendPoint(date: date, spendUSD: spendUSD)
+    }
+}
+
+public enum SpendBreakdownCategory: String, CaseIterable, Sendable {
+    case models
+    case providers
+    case modelGroups
+    case endpoints
+    case mcpServers
+    case apiKeys
+}
+
+public struct SpendBreakdownItem: Equatable, Sendable {
+    public let label: String
+    public let spendUSD: Decimal
+    public let tokens: Int?
+    public let requests: Int?
+
+    public init(label: String, spendUSD: Decimal, tokens: Int?, requests: Int?) {
+        self.label = label
+        self.spendUSD = spendUSD
+        self.tokens = tokens
+        self.requests = requests
+    }
+}
+
+public enum SpendDataSource: String, Equatable, Sendable {
+    case userDailyActivity
+    case spendLogsFallback
+    case staleCache
+}
+
+public struct SpendAnalyticsSummary: Equatable, Sendable {
+    public let totalSpendUSD: Decimal
+    public let totals: SpendUsageTotals
+    public let dailyPoints: [DailyActivityPoint]
+    public let breakdowns: [SpendBreakdownCategory: [SpendBreakdownItem]]
+    public let source: SpendDataSource
+
+    public init(
+        totalSpendUSD: Decimal,
+        totals: SpendUsageTotals,
+        dailyPoints: [DailyActivityPoint],
+        breakdowns: [SpendBreakdownCategory: [SpendBreakdownItem]],
+        source: SpendDataSource
+    ) {
+        self.totalSpendUSD = totalSpendUSD
+        self.totals = totals
+        self.dailyPoints = dailyPoints
+        self.breakdowns = breakdowns
+        self.source = source
+    }
+
+    public var activitySummary: SpendActivitySummary {
+        SpendActivitySummary(totalSpendUSD: totalSpendUSD, dailyPoints: dailyPoints.map(\.spendPoint))
+    }
+
+    public func markingSource(_ source: SpendDataSource) -> SpendAnalyticsSummary {
+        SpendAnalyticsSummary(
+            totalSpendUSD: totalSpendUSD,
+            totals: totals,
+            dailyPoints: dailyPoints,
+            breakdowns: breakdowns,
+            source: source
+        )
+    }
+}
+
 public struct SpendSnapshot: Equatable, Sendable {
     public let range: SpendRange
     public let totalSpendUSD: Decimal
@@ -79,8 +204,20 @@ public struct SpendSnapshot: Equatable, Sendable {
     public let dailyPoints: [DailySpendPoint]
     public let refreshedAt: Date
     public let isStale: Bool
+    public let analytics: SpendAnalyticsSummary?
+    public let userContext: LiteLLMUserContext?
 
-    public init(range: SpendRange, totalSpendUSD: Decimal, limitUSD: Decimal, percentOfLimit: Decimal, dailyPoints: [DailySpendPoint], refreshedAt: Date, isStale: Bool) {
+    public init(
+        range: SpendRange,
+        totalSpendUSD: Decimal,
+        limitUSD: Decimal,
+        percentOfLimit: Decimal,
+        dailyPoints: [DailySpendPoint],
+        refreshedAt: Date,
+        isStale: Bool,
+        analytics: SpendAnalyticsSummary? = nil,
+        userContext: LiteLLMUserContext? = nil
+    ) {
         self.range = range
         self.totalSpendUSD = totalSpendUSD
         self.limitUSD = limitUSD
@@ -88,6 +225,8 @@ public struct SpendSnapshot: Equatable, Sendable {
         self.dailyPoints = dailyPoints
         self.refreshedAt = refreshedAt
         self.isStale = isStale
+        self.analytics = analytics
+        self.userContext = userContext
     }
 
     public func markingStale() -> SpendSnapshot {
@@ -98,7 +237,9 @@ public struct SpendSnapshot: Equatable, Sendable {
             percentOfLimit: percentOfLimit,
             dailyPoints: dailyPoints,
             refreshedAt: refreshedAt,
-            isStale: true
+            isStale: true,
+            analytics: analytics?.markingSource(.staleCache),
+            userContext: userContext
         )
     }
 }
@@ -120,6 +261,28 @@ public enum SpendAggregator {
             dailyPoints: activity.dailyPoints.sorted { $0.date < $1.date },
             refreshedAt: refreshedAt,
             isStale: isStale
+        )
+    }
+
+    public static func snapshot(
+        analytics: SpendAnalyticsSummary,
+        range: SpendRange,
+        limitUSD: Decimal,
+        refreshedAt: Date,
+        isStale: Bool = false,
+        userContext: LiteLLMUserContext? = nil
+    ) -> SpendSnapshot {
+        let percent = limitUSD == 0 ? 0 : analytics.totalSpendUSD / limitUSD
+        return SpendSnapshot(
+            range: range,
+            totalSpendUSD: analytics.totalSpendUSD,
+            limitUSD: limitUSD,
+            percentOfLimit: percent,
+            dailyPoints: analytics.dailyPoints.map(\.spendPoint).sorted { $0.date < $1.date },
+            refreshedAt: refreshedAt,
+            isStale: isStale,
+            analytics: analytics,
+            userContext: userContext
         )
     }
 

@@ -11,6 +11,7 @@ public final class SpendDashboardViewModel {
     public var selectedRange: SpendRange = .today
     public var currentSnapshot: SpendSnapshot?
     public var menuBarSnapshot: SpendSnapshot?
+    public var currentAnalyticsSummary: SpendAnalyticsSummary?
     public var userContext: LiteLLMUserContext?
     public var errorMessage: String?
     public var isRefreshing = false
@@ -113,9 +114,13 @@ public final class SpendDashboardViewModel {
         case let .refreshed(snapshot):
             if toCurrentSnapshot {
                 currentSnapshot = snapshot
+                currentAnalyticsSummary = snapshot.analytics
             }
             if toMenuBarSnapshot {
                 menuBarSnapshot = snapshot
+            }
+            if let snapshotUserContext = snapshot.userContext {
+                userContext = snapshotUserContext
             }
             errorMessage = nil
             requiresSetup = false
@@ -123,9 +128,13 @@ public final class SpendDashboardViewModel {
         case let .stale(snapshot, message):
             if toCurrentSnapshot {
                 currentSnapshot = snapshot
+                currentAnalyticsSummary = snapshot.analytics ?? currentAnalyticsSummary
             }
             if toMenuBarSnapshot {
                 menuBarSnapshot = snapshot
+            }
+            if let snapshotUserContext = snapshot.userContext {
+                userContext = snapshotUserContext
             }
             errorMessage = message
             requiresSetup = false

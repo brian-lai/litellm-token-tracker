@@ -30,21 +30,42 @@ public struct SpendService: SpendServicing {
             let dateRange = rangeResolver.dateRange(for: range, now: now, calendar: calendar)
             let snapshot: SpendSnapshot
             do {
-                let activity = try await client.fetchUserDailyActivity(range: dateRange, userID: user.userID)
+                let analytics = try await client.fetchUserDailyActivity(range: dateRange, userID: user.userID)
                 snapshot = SpendAggregator.snapshot(
-                    activity: activity,
+                    analytics: analytics,
                     range: range,
                     limitUSD: configuration.spendLimitUSD,
-                    refreshedAt: now
+                    refreshedAt: now,
+                    userContext: user
                 )
             } catch {
                 let rows = try await client.fetchSpendRows(range: dateRange, userID: user.userID)
-                snapshot = SpendAggregator.snapshot(
+                let fallbackSnapshot = SpendAggregator.snapshot(
                     rows: rows,
                     range: range,
                     dateRange: dateRange,
                     limitUSD: configuration.spendLimitUSD,
                     refreshedAt: now
+                )
+                let analytics = SpendAnalyticsSummary(
+                    totalSpendUSD: fallbackSnapshot.totalSpendUSD,
+                    totals: .zero,
+                    dailyPoints: fallbackSnapshot.dailyPoints.map {
+                        DailyActivityPoint(date: $0.date, spendUSD: $0.spendUSD, totals: .zero)
+                    },
+                    breakdowns: [:],
+                    source: .spendLogsFallback
+                )
+                snapshot = SpendSnapshot(
+                    range: fallbackSnapshot.range,
+                    totalSpendUSD: fallbackSnapshot.totalSpendUSD,
+                    limitUSD: fallbackSnapshot.limitUSD,
+                    percentOfLimit: fallbackSnapshot.percentOfLimit,
+                    dailyPoints: fallbackSnapshot.dailyPoints,
+                    refreshedAt: fallbackSnapshot.refreshedAt,
+                    isStale: fallbackSnapshot.isStale,
+                    analytics: analytics,
+                    userContext: user
                 )
             }
             try? cache.saveSnapshot(snapshot)
