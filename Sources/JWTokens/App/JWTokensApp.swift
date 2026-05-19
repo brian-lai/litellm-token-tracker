@@ -39,21 +39,25 @@ final class JWTokensAppDelegate: NSObject, NSApplicationDelegate {
             return previewViewModel
         }
         let apiKeyStore = LocalFileAPIKeyStore()
+        let configurationStore = LocalAppConfigurationStore()
         return SpendDashboardViewModel(
             spendService: SpendService(
                 apiKeyStore: apiKeyStore,
+                configurationStore: configurationStore,
                 clientFactory: { baseURL, apiKey in
                     LiteLLMClient(baseURL: baseURL, apiKey: apiKey)
                 }
             ),
             keyContextService: KeyContextService(
                 apiKeyStore: apiKeyStore,
+                configurationStore: configurationStore,
                 clientFactory: { baseURL, apiKey in
                     LiteLLMClient(baseURL: baseURL, apiKey: apiKey)
                 }
             ),
             apiKeyStore: apiKeyStore,
-            menuBarPreferenceStore: UserDefaultsMenuBarPreferenceStore()
+            menuBarPreferenceStore: UserDefaultsMenuBarPreferenceStore(),
+            configurationStore: configurationStore
         )
     }
 }

@@ -242,6 +242,20 @@ public struct SpendSnapshot: Equatable, Sendable {
             userContext: userContext
         )
     }
+
+    public func applyingLimit(_ limitUSD: Decimal) -> SpendSnapshot {
+        SpendSnapshot(
+            range: range,
+            totalSpendUSD: totalSpendUSD,
+            limitUSD: limitUSD,
+            percentOfLimit: limitUSD == 0 ? 0 : totalSpendUSD / limitUSD,
+            dailyPoints: dailyPoints,
+            refreshedAt: refreshedAt,
+            isStale: isStale,
+            analytics: analytics,
+            userContext: userContext
+        )
+    }
 }
 
 public enum SpendAggregator {
@@ -375,6 +389,11 @@ public struct KeySpendSummary: Equatable, Sendable {
 
 public protocol SpendServicing: Sendable {
     func refresh(range: SpendRange, now: Date, calendar: Calendar) async -> SpendRefreshResult
+    func clearCache()
+}
+
+public extension SpendServicing {
+    func clearCache() {}
 }
 
 public protocol DateRangeResolving: Sendable {

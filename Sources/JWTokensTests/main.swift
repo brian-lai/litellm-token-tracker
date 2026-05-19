@@ -145,6 +145,45 @@ struct FakeClient: LiteLLMClientProtocol {
     }
 }
 
+final class MutableFakeClient: LiteLLMClientProtocol, @unchecked Sendable {
+    var userResult: Result<LiteLLMUserContext, Error>
+    var activityResult: Result<SpendAnalyticsSummary, Error>?
+    var rowsResult: Result<[SpendLogSummaryRow], Error>
+
+    init(
+        userResult: Result<LiteLLMUserContext, Error>,
+        activityResult: Result<SpendAnalyticsSummary, Error>? = nil,
+        rowsResult: Result<[SpendLogSummaryRow], Error>
+    ) {
+        self.userResult = userResult
+        self.activityResult = activityResult
+        self.rowsResult = rowsResult
+    }
+
+    func fetchCurrentUser() async throws -> LiteLLMUserContext {
+        try userResult.get()
+    }
+
+    func fetchUserDailyActivity(range: DateRange, userID: String) async throws -> SpendAnalyticsSummary {
+        if let activityResult {
+            return try activityResult.get()
+        }
+        throw LiteLLMClientError.unavailable
+    }
+
+    func fetchSpendRows(range: DateRange, userID: String) async throws -> [SpendLogSummaryRow] {
+        try rowsResult.get()
+    }
+
+    func fetchCurrentKey() async throws -> KeySpendSummary {
+        throw LiteLLMClientError.unavailable
+    }
+
+    func fetchUserKeys(userID: String) async throws -> [KeySpendSummary] {
+        throw LiteLLMClientError.unavailable
+    }
+}
+
 final class RecordingSpendService: SpendServicing, @unchecked Sendable {
     var results: [SpendRefreshResult]
     var requestedRanges: [SpendRange] = []
@@ -823,6 +862,13 @@ func temporaryAPIKeyFileURL() -> URL {
         .appendingPathComponent("litellm_api_key", isDirectory: false)
 }
 
+func temporaryConfigurationFileURL() -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent("jw_tokens_tests", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        .appendingPathComponent("config.json", isDirectory: false)
+}
+
 func permissions(at url: URL) throws -> Int {
     let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
     guard let value = attributes[.posixPermissions] as? NSNumber else {
@@ -835,6 +881,81 @@ func testDoesNotExposeKeyInErrorDescription() throws {
     let errorDescription = APIKeyStoreError.unavailable.description
 
     try expect(!errorDescription.contains("secret-token"), "error description should not expose API keys")
+}
+
+func testConfigurationStorePersistsSpendLimit() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    let store = LocalAppConfigurationStore(fileURL: fileURL)
+
+    try store.saveConfiguration(AppConfiguration(spendLimitUSD: 125))
+    let configuration = try store.loadConfiguration()
+
+    try expectEqual(configuration.spendLimitUSD, 125, "configuration store should persist spend limit")
+    try expectEqual(try permissions(at: fileURL), 0o600, "configuration file should be private by default")
+}
+
+func testConfigurationStorePersistsBaseURL() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    let store = LocalAppConfigurationStore(fileURL: fileURL)
+    let baseURL = URL(string: "https://litellm.example.internal")!
+
+    try store.saveConfiguration(AppConfiguration(baseURL: baseURL, spendLimitUSD: 80))
+    let configuration = try store.loadConfiguration()
+
+    try expectEqual(configuration.baseURL, baseURL, "configuration store should persist base URL")
+}
+
+func testConfigurationStoreFallsBackOnInvalidValues() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"baseURL":"not-a-url","spendLimitUSD":"-1"}"#.utf8).write(to: fileURL)
+    let defaults = AppConfiguration(baseURL: URL(string: "https://litellm.justworksai.net")!, spendLimitUSD: 80)
+    let store = LocalAppConfigurationStore(fileURL: fileURL, defaults: defaults)
+
+    let configuration = try store.loadConfiguration()
+
+    try expectEqual(configuration, defaults, "invalid configuration values should fall back to defaults")
+}
+
+func testConfigurationStoreRejectsNonHTTPSchemes() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"baseURL":"httpx://litellm.example.internal","spendLimitUSD":"40"}"#.utf8).write(to: fileURL)
+    let defaults = AppConfiguration(baseURL: URL(string: "https://litellm.justworksai.net")!, spendLimitUSD: 80)
+    let store = LocalAppConfigurationStore(fileURL: fileURL, defaults: defaults)
+
+    let configuration = try store.loadConfiguration()
+
+    try expectEqual(configuration.baseURL, defaults.baseURL, "configuration store should reject non-http URL schemes")
+    try expectEqual(configuration.spendLimitUSD, 40, "valid fields should still load when base URL falls back")
+}
+
+func testConfigurationStoreNormalizesSecretBearingBaseURLOnSave() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    let store = LocalAppConfigurationStore(fileURL: fileURL)
+    let secretURL = URL(string: "https://user:secret-token@litellm.example.internal/v1?api_key=sk-should-not-display#token")!
+
+    try store.saveConfiguration(AppConfiguration(baseURL: secretURL, spendLimitUSD: 80))
+    let rawConfig = try String(contentsOf: fileURL, encoding: .utf8)
+    let configuration = try store.loadConfiguration()
+
+    try expectEqual(configuration.baseURL.absoluteString, "https://litellm.example.internal/v1", "configuration store should normalize secret-bearing base URLs")
+    try expect(!rawConfig.contains("secret-token"), "configuration file should not persist URL userinfo secrets")
+    try expect(!rawConfig.contains("sk-should-not-display"), "configuration file should not persist URL query secrets")
+}
+
+func testConfigurationStoreNormalizesSecretBearingBaseURLOnLoad() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"baseURL":"https://user:secret-token@litellm.example.internal/v1?api_key=sk-should-not-display#token","spendLimitUSD":"80"}"#.utf8).write(to: fileURL)
+    let store = LocalAppConfigurationStore(fileURL: fileURL)
+
+    let configuration = try store.loadConfiguration()
+    let rawConfig = try String(contentsOf: fileURL, encoding: .utf8)
+
+    try expectEqual(configuration.baseURL.absoluteString, "https://litellm.example.internal/v1", "configuration store should normalize existing secret-bearing base URLs")
+    try expect(!rawConfig.contains("secret-token"), "configuration load should scrub existing URL userinfo secrets from disk")
+    try expect(!rawConfig.contains("sk-should-not-display"), "configuration load should scrub existing URL query secrets from disk")
 }
 
 func testRefreshFetchesUserThenTodaySpend() async throws {
@@ -995,20 +1116,19 @@ func testRefreshFallsBackToSpendLogsWhenDailyActivityIsUnauthorized() async thro
 }
 
 func testReturnsStaleSnapshotOnTransientAPIFailure() async throws {
-    let stale = SpendSnapshot(range: .today, totalSpendUSD: 5, limitUSD: 80, percentOfLimit: Decimal(string: "0.0625")!, dailyPoints: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
     let cache = InMemorySpendSnapshotCache()
-    try cache.saveSnapshot(stale)
+    let client = MutableFakeClient(
+        userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        rowsResult: .success([SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: 5)])
+    )
     let service = SpendService(
         apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
-        clientFactory: { _, _ in
-            FakeClient(
-                userResult: .failure(LiteLLMClientError.unavailable),
-                rowsResult: .success([])
-            )
-        },
+        clientFactory: { _, _ in client },
         cache: cache
     )
 
+    _ = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    client.userResult = .failure(LiteLLMClientError.unavailable)
     let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
 
     guard case let .stale(snapshot, _) = result else {
@@ -1016,6 +1136,58 @@ func testReturnsStaleSnapshotOnTransientAPIFailure() async throws {
     }
     try expectEqual(snapshot.totalSpendUSD, 5, "service should return cached stale spend")
     try expect(snapshot.isStale, "service should mark cached fallback snapshots stale")
+}
+
+func testSpendServiceStaleCacheIsScopedByCredential() async throws {
+    let store = MutableAPIKeyStore()
+    try store.saveAPIKey("first-key")
+    let firstClient = FakeClient(
+        userResult: .success(LiteLLMUserContext(userID: "first-user", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        rowsResult: .success([SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: 12)])
+    )
+    let secondClient = FakeClient(
+        userResult: .failure(LiteLLMClientError.unavailable),
+        rowsResult: .success([])
+    )
+    let service = SpendService(apiKeyStore: store, clientFactory: { _, apiKey in
+        apiKey == "first-key" ? firstClient : secondClient
+    })
+
+    _ = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    try store.saveAPIKey("second-key")
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18").addingTimeInterval(60), calendar: fixedCalendar())
+
+    guard case .failed = result else {
+        throw TestFailure(description: "spend service should not return another credential's stale spend")
+    }
+}
+
+func testSpendServiceStaleCacheIsScopedByBaseURL() async throws {
+    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://first.example.internal")!, spendLimitUSD: 80))
+    let firstClient = FakeClient(
+        userResult: .success(LiteLLMUserContext(userID: "first-user", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        rowsResult: .success([SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: 12)])
+    )
+    let secondClient = FakeClient(
+        userResult: .failure(LiteLLMClientError.unavailable),
+        rowsResult: .success([])
+    )
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: configurationStore,
+        clientFactory: { baseURL, _ in
+            baseURL.host == "first.example.internal" ? firstClient : secondClient
+        }
+    )
+
+    _ = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://second.example.internal")!, spendLimitUSD: 80))
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18").addingTimeInterval(60), calendar: fixedCalendar())
+
+    guard case .failed = result else {
+        throw TestFailure(description: "spend service should not return another base URL's stale spend")
+    }
 }
 
 func testAuthFailureReturnsAuthFailedWithoutRetrying() async throws {
@@ -1093,6 +1265,29 @@ func testUsesConfiguredSpendLimit() async throws {
     try expectEqual(snapshot.percentOfLimit, Decimal(string: "0.25")!, "service should compute percent from configured limit")
 }
 
+func testSpendServiceUsesPersistedSpendLimit() async throws {
+    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    try configurationStore.saveConfiguration(AppConfiguration(spendLimitUSD: 40))
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: configurationStore,
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+                rowsResult: .success([SpendLogSummaryRow(date: try! fixedDate("2026-05-18"), spendUSD: 10)])
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "expected refreshed result")
+    }
+    try expectEqual(snapshot.limitUSD, 40, "spend service should use persisted spend limit")
+    try expectEqual(snapshot.percentOfLimit, Decimal(string: "0.25")!, "persisted spend limit should drive percentage")
+}
+
 func snapshot(range: SpendRange = .today, total: Decimal = 8, isStale: Bool = false) throws -> SpendSnapshot {
     SpendSnapshot(
         range: range,
@@ -1103,6 +1298,153 @@ func snapshot(range: SpendRange = .today, total: Decimal = 8, isStale: Bool = fa
         refreshedAt: try fixedDate("2026-05-18"),
         isStale: isStale
     )
+}
+
+@MainActor
+func testChangingSpendLimitRefreshesPresentationWithoutNetwork() async throws {
+    let service = RecordingSpendService(results: [])
+    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    try configurationStore.saveConfiguration(AppConfiguration(spendLimitUSD: 80))
+    let viewModel = SpendDashboardViewModel(spendService: service, configurationStore: configurationStore)
+    viewModel.currentSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.menuBarSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.spendLimitDraft = "100"
+
+    viewModel.saveSpendLimit()
+
+    try expectEqual(service.requestedRanges, [], "changing spend limit should not perform a network refresh")
+    try expectEqual(viewModel.currentSnapshot?.limitUSD, 100, "current presentation should use the new spend limit")
+    try expectEqual(viewModel.currentSnapshot?.percentOfLimit, Decimal(string: "0.4")!, "current percentage should be recomputed")
+    try expectEqual(viewModel.menuBarSnapshot?.percentOfLimit, Decimal(string: "0.4")!, "menu bar percentage should be recomputed")
+}
+
+@MainActor
+func testInvalidSpendLimitShowsSettingsError() async throws {
+    let service = RecordingSpendService(results: [])
+    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    let viewModel = SpendDashboardViewModel(spendService: service, configurationStore: configurationStore)
+    viewModel.spendLimitDraft = "-1"
+
+    viewModel.saveSpendLimit()
+
+    try expectEqual(service.requestedRanges, [], "invalid spend limit should not refresh spend")
+    try expectEqual(viewModel.settingsErrorMessage, "Spend limit must be a positive dollar amount", "invalid spend limit should show a scoped settings error")
+}
+
+@MainActor
+func testInvalidBaseURLShowsSettingsError() async throws {
+    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), configurationStore: configurationStore)
+    viewModel.baseURLDraft = "httpx://litellm.example.internal"
+
+    viewModel.saveBaseURL()
+
+    try expectEqual(viewModel.settingsErrorMessage, "Base URL must be a valid HTTP URL", "invalid base URL should show a scoped settings error")
+}
+
+@MainActor
+func testChangingBaseURLClearsSpendSnapshots() async throws {
+    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.justworksai.net")!, spendLimitUSD: 80))
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), configurationStore: configurationStore)
+    viewModel.currentSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.menuBarSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.currentAnalyticsSummary = analyticsSummary(totalSpendUSD: 40, dailyPoints: [], source: .userDailyActivity)
+    viewModel.baseURLDraft = "https://litellm.example.internal"
+
+    viewModel.saveBaseURL()
+
+    try expectEqual(viewModel.currentSnapshot, nil, "base URL changes should clear current spend from the old endpoint")
+    try expectEqual(viewModel.menuBarSnapshot, nil, "base URL changes should clear menu bar spend from the old endpoint")
+    try expectEqual(viewModel.currentAnalyticsSummary, nil, "base URL changes should clear analytics from the old endpoint")
+}
+
+@MainActor
+func testChangingBaseURLPreservesSetupPauseState() async throws {
+    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.justworksai.net")!, spendLimitUSD: 80))
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), configurationStore: configurationStore)
+    viewModel.requiresSetup = true
+    viewModel.pausesAutomaticRefresh = true
+    viewModel.baseURLDraft = "https://litellm.example.internal"
+
+    viewModel.saveBaseURL()
+
+    try expect(viewModel.requiresSetup, "base URL changes should not hide existing setup state")
+    try expect(viewModel.pausesAutomaticRefresh, "base URL changes should not resume automatic refresh when setup is still required")
+}
+
+@MainActor
+func testAPIKeyChangeClearsSpendSnapshots() async throws {
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []))
+    viewModel.currentSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.menuBarSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.currentAnalyticsSummary = analyticsSummary(totalSpendUSD: 40, dailyPoints: [], source: .userDailyActivity)
+
+    viewModel.apiKeyDidChange()
+
+    try expectEqual(viewModel.currentSnapshot, nil, "API key changes should clear current spend from the old credential")
+    try expectEqual(viewModel.menuBarSnapshot, nil, "API key changes should clear menu bar spend from the old credential")
+    try expectEqual(viewModel.currentAnalyticsSummary, nil, "API key changes should clear analytics from the old credential")
+}
+
+@MainActor
+func testClearingAPIKeyClearsSpendSnapshots() async throws {
+    let store = MutableAPIKeyStore()
+    try store.saveAPIKey("secret-token")
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), apiKeyStore: store)
+    viewModel.currentSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.menuBarSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.currentAnalyticsSummary = analyticsSummary(totalSpendUSD: 40, dailyPoints: [], source: .userDailyActivity)
+
+    viewModel.clearAPIKey()
+
+    try expectEqual(viewModel.currentSnapshot, nil, "clearing API key should clear current spend from the old credential")
+    try expectEqual(viewModel.menuBarSnapshot, nil, "clearing API key should clear menu bar spend from the old credential")
+    try expectEqual(viewModel.currentAnalyticsSummary, nil, "clearing API key should clear analytics from the old credential")
+}
+
+@MainActor
+func testAPIKeyChangeClearsSpendServiceFallbackCache() async throws {
+    let store = MutableAPIKeyStore()
+    try store.saveAPIKey("first-key")
+    let firstClient = FakeClient(
+        userResult: .success(LiteLLMUserContext(userID: "first-user", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        rowsResult: .success([SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: 12)])
+    )
+    let secondClient = FakeClient(
+        userResult: .failure(LiteLLMClientError.unavailable),
+        rowsResult: .success([])
+    )
+    let spendService = SpendService(apiKeyStore: store, clientFactory: { _, apiKey in
+        apiKey == "first-key" ? firstClient : secondClient
+    })
+    let viewModel = SpendDashboardViewModel(spendService: spendService)
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    try store.saveAPIKey("second-key")
+    viewModel.apiKeyDidChange()
+    await viewModel.refresh(now: try fixedDate("2026-05-18").addingTimeInterval(60), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.currentSnapshot, nil, "API key changes should clear spend service fallback cache")
+    try expectEqual(viewModel.errorMessage, "Unable to refresh spend", "new credential transient failure should not show old credential stale spend")
+}
+
+@MainActor
+func testInFlightRefreshDoesNotRepopulateAfterAPIKeyChange() async throws {
+    let service = SuspendingSpendService()
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    async let refresh: Void = viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    while await service.callCount == 0 {
+        await Task.yield()
+    }
+    viewModel.apiKeyDidChange()
+    await service.resume(with: .refreshed(try snapshot(range: .today, total: 12)))
+    try await refresh
+
+    try expectEqual(viewModel.currentSnapshot, nil, "in-flight old credential refresh should not repopulate current spend")
+    try expectEqual(viewModel.menuBarSnapshot, nil, "in-flight old credential refresh should not repopulate menu bar spend")
 }
 
 func analyticsSummary(totalSpendUSD: Decimal, dailyPoints: [DailySpendPoint], source: SpendDataSource = .userDailyActivity) -> SpendAnalyticsSummary {
@@ -1888,21 +2230,20 @@ func testAuthFailurePreservesMenuBarSnapshot() async throws {
 
 @MainActor
 func testStaleFallbackMarksMenuBarAccessibilityStale() async throws {
-    let stale = try snapshot(range: .today, total: 5, isStale: false)
     let cache = InMemorySpendSnapshotCache()
-    try cache.saveSnapshot(stale)
+    let client = MutableFakeClient(
+        userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        rowsResult: .success([SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: 5)])
+    )
     let service = SpendService(
         apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
-        clientFactory: { _, _ in
-            FakeClient(
-                userResult: .failure(LiteLLMClientError.unavailable),
-                rowsResult: .success([])
-            )
-        },
+        clientFactory: { _, _ in client },
         cache: cache
     )
     let viewModel = SpendDashboardViewModel(spendService: service)
 
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    client.userResult = .failure(LiteLLMClientError.unavailable)
     await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
 
     try expect(viewModel.menuBarSnapshot?.isStale == true, "view model should store stale-marked cached fallback")
@@ -2060,8 +2401,8 @@ func testSelectingPopoverModeDoesNotRefreshSpend() async throws {
 }
 
 func testPopoverModesExposeOverviewTrendsBreakdown() throws {
-    try expectEqual(SpendPopoverMode.allCases, [.overview, .trends, .breakdown, .keys], "popover should expose analytics and key modes")
-    try expectEqual(SpendPopoverMode.allCases.map(\.displayName), ["Overview", "Trends", "Breakdown", "Keys"], "popover modes should have display names")
+    try expectEqual(SpendPopoverMode.allCases, [.overview, .trends, .breakdown, .keys, .settings], "popover should expose analytics, key, and settings modes")
+    try expectEqual(SpendPopoverMode.allCases.map(\.displayName), ["Overview", "Trends", "Breakdown", "Keys", "Settings"], "popover modes should have display names")
 }
 
 @MainActor
@@ -2369,6 +2710,118 @@ func testKeyHardFailureClearsPreviousKeyContext() async throws {
     try expectEqual(viewModel.keyContextErrorMessage, "Unable to load key context", "hard key failure should remain visible")
 }
 
+func testSettingsModeShowsCredentialSourceWithoutSecretPathByDefault() throws {
+    let presentation = SettingsPresentation.make(baseURLText: "https://litellm.justworksai.net", spendLimitText: "80", snapshot: nil, settingsError: nil)
+    let rows = Dictionary(uniqueKeysWithValues: presentation.diagnosticRows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Credential"], "Local file", "settings diagnostics should show credential source")
+    try expectEqual(rows["Credential path"], "Hidden by default", "settings diagnostics should not show credential path by default")
+}
+
+func testSettingsModeShowsDataSource() throws {
+    let snapshot = SpendSnapshot(
+        range: .today,
+        totalSpendUSD: 8,
+        limitUSD: 80,
+        percentOfLimit: Decimal(string: "0.1")!,
+        dailyPoints: [],
+        refreshedAt: try fixedDate("2026-05-18"),
+        isStale: false,
+        analytics: analyticsSummary(totalSpendUSD: 8, dailyPoints: [], source: .userDailyActivity)
+    )
+    let presentation = SettingsPresentation.make(baseURLText: "https://litellm.justworksai.net", spendLimitText: "80", snapshot: snapshot, settingsError: nil)
+    let rows = Dictionary(uniqueKeysWithValues: presentation.diagnosticRows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Source"], "Daily activity", "settings diagnostics should show current spend data source")
+}
+
+@MainActor
+func testSettingsModeCanClearAPIKey() async throws {
+    let store = MutableAPIKeyStore()
+    try store.saveAPIKey("secret-token")
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), apiKeyStore: store)
+
+    viewModel.clearAPIKey()
+
+    try expectEqual(store.savedKeys, [], "clear API key should delete stored credential")
+    try expect(viewModel.requiresSetup, "clearing API key should return app to setup state")
+    try expect(viewModel.pausesAutomaticRefresh, "clearing API key should pause automatic refresh")
+}
+
+func testSettingsModeShowsBaseURL() throws {
+    let presentation = SettingsPresentation.make(baseURLText: "https://litellm.justworksai.net", spendLimitText: "80", snapshot: nil, settingsError: nil)
+    let rows = Dictionary(uniqueKeysWithValues: presentation.diagnosticRows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Endpoint"], "https://litellm.justworksai.net", "settings diagnostics should show configured base URL")
+}
+
+func testSettingsModeDocumentsLocalFileStoreRisk() throws {
+    let presentation = SettingsPresentation.make(baseURLText: "https://litellm.justworksai.net", spendLimitText: "80", snapshot: nil, settingsError: nil)
+
+    try expect(presentation.warningText.contains("local-development exception"), "settings diagnostics should document local file credential risk")
+    try expect(presentation.warningText.contains("Keychain"), "settings diagnostics should point company builds back to Keychain or managed storage")
+}
+
+func testDiagnosticSummaryRedactsAPIKey() throws {
+    let summary = DiagnosticSummary.make(
+        baseURLText: "https://litellm.justworksai.net",
+        snapshot: nil,
+        lastError: "Request failed for Bearer secret-token and sk-should-not-display"
+    )
+    let rendered = String(describing: summary)
+
+    try expect(!rendered.contains("secret-token"), "diagnostic summary should redact API key-like values")
+    try expect(!rendered.contains("sk-should-not-display"), "diagnostic summary should redact raw LiteLLM key-like values")
+}
+
+func testDiagnosticSummaryRedactsEndpointSecrets() throws {
+    let summary = DiagnosticSummary.make(
+        baseURLText: "https://user:secret-token@litellm.example.internal/v1?token=abc123&api_key=sk-should-not-display#sk-fragment",
+        snapshot: nil
+    )
+    let rows = Dictionary(uniqueKeysWithValues: summary.rows.map { ($0.label, $0.value) })
+    let endpoint = rows["Endpoint"] ?? ""
+
+    try expectEqual(endpoint, "https://litellm.example.internal/v1", "diagnostic endpoint should remove userinfo, query, and fragment")
+    try expect(!String(describing: summary).contains("secret-token"), "diagnostic endpoint should not expose userinfo secrets")
+    try expect(!String(describing: summary).contains("sk-should-not-display"), "diagnostic endpoint should not expose query secrets")
+}
+
+func testDiagnosticSummaryDoesNotIncludeCredentialPathByDefault() throws {
+    let summary = DiagnosticSummary.make(baseURLText: "https://litellm.justworksai.net", snapshot: nil)
+    let rows = Dictionary(uniqueKeysWithValues: summary.rows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Credential path"], "Hidden by default", "diagnostic summary should not include the credential path by default")
+}
+
+func testDiagnosticSummaryIncludesEndpointSourceAndUserID() throws {
+    let user = LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)
+    let snapshot = SpendSnapshot(
+        range: .today,
+        totalSpendUSD: 8,
+        limitUSD: 80,
+        percentOfLimit: Decimal(string: "0.1")!,
+        dailyPoints: [],
+        refreshedAt: try fixedDate("2026-05-18"),
+        isStale: false,
+        analytics: analyticsSummary(totalSpendUSD: 8, dailyPoints: [], source: .userDailyActivity),
+        userContext: user
+    )
+    let summary = DiagnosticSummary.make(baseURLText: "https://litellm.justworksai.net", snapshot: snapshot)
+    let rows = Dictionary(uniqueKeysWithValues: summary.rows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Endpoint"], "https://litellm.justworksai.net", "diagnostic summary should include endpoint")
+    try expectEqual(rows["Source"], "Daily activity", "diagnostic summary should include data source")
+    try expectEqual(rows["User"], "user-123", "diagnostic summary should include user id")
+}
+
+func testDiagnosticSummaryIncludesLastError() throws {
+    let summary = DiagnosticSummary.make(baseURLText: "https://litellm.justworksai.net", snapshot: nil, lastError: "Unable to refresh spend")
+    let rows = Dictionary(uniqueKeysWithValues: summary.rows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Last error"], "Unable to refresh spend", "diagnostic summary should include last scoped error")
+}
+
 func testKeysModeShowsCurrentKeyAlias() throws {
     let snapshot = KeyContextSnapshot(currentKey: keySummary(alias: "Claude Code", spend: 65), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
     let presentation = KeyBudgetPresentation.make(snapshot: snapshot, errorMessage: nil, calendar: fixedCalendar())
@@ -2487,6 +2940,12 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testLocalFileAPIKeyStoreMissingFileMapsToMissingKey", testLocalFileAPIKeyStoreMissingFileMapsToMissingKey),
     ("testLocalFileAPIKeyStoreUsesPrivatePermissions", testLocalFileAPIKeyStoreUsesPrivatePermissions),
     ("testDoesNotExposeKeyInErrorDescription", testDoesNotExposeKeyInErrorDescription),
+    ("testConfigurationStorePersistsSpendLimit", testConfigurationStorePersistsSpendLimit),
+    ("testConfigurationStorePersistsBaseURL", testConfigurationStorePersistsBaseURL),
+    ("testConfigurationStoreFallsBackOnInvalidValues", testConfigurationStoreFallsBackOnInvalidValues),
+    ("testConfigurationStoreRejectsNonHTTPSchemes", testConfigurationStoreRejectsNonHTTPSchemes),
+    ("testConfigurationStoreNormalizesSecretBearingBaseURLOnSave", testConfigurationStoreNormalizesSecretBearingBaseURLOnSave),
+    ("testConfigurationStoreNormalizesSecretBearingBaseURLOnLoad", testConfigurationStoreNormalizesSecretBearingBaseURLOnLoad),
     ("testDefaultTitleShowsTodaySpendAndLimitPercent", testDefaultTitleShowsTodaySpendAndLimitPercent),
     ("testSetupStateUsesCompactTitle", testSetupStateUsesCompactTitle),
     ("testShowsAllFiveRanges", testShowsAllFiveRanges),
@@ -2526,6 +2985,15 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testKeysModeRowsHaveStableIDsForDuplicateNames", testKeysModeRowsHaveStableIDsForDuplicateNames),
     ("testKeysModeShowsBudgetResetContext", testKeysModeShowsBudgetResetContext),
     ("testKeysModeShowsScopedError", testKeysModeShowsScopedError),
+    ("testSettingsModeShowsCredentialSourceWithoutSecretPathByDefault", testSettingsModeShowsCredentialSourceWithoutSecretPathByDefault),
+    ("testSettingsModeShowsDataSource", testSettingsModeShowsDataSource),
+    ("testSettingsModeShowsBaseURL", testSettingsModeShowsBaseURL),
+    ("testSettingsModeDocumentsLocalFileStoreRisk", testSettingsModeDocumentsLocalFileStoreRisk),
+    ("testDiagnosticSummaryRedactsAPIKey", testDiagnosticSummaryRedactsAPIKey),
+    ("testDiagnosticSummaryRedactsEndpointSecrets", testDiagnosticSummaryRedactsEndpointSecrets),
+    ("testDiagnosticSummaryDoesNotIncludeCredentialPathByDefault", testDiagnosticSummaryDoesNotIncludeCredentialPathByDefault),
+    ("testDiagnosticSummaryIncludesEndpointSourceAndUserID", testDiagnosticSummaryIncludesEndpointSourceAndUserID),
+    ("testDiagnosticSummaryIncludesLastError", testDiagnosticSummaryIncludesLastError),
     ("testSpendStatusBandThresholds", testSpendStatusBandThresholds),
     ("testRingProgressClampsOverLimitSpend", testRingProgressClampsOverLimitSpend),
     ("testRingPresentationFormatsDollarMetric", testRingPresentationFormatsDollarMetric),
@@ -2570,11 +3038,23 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testFallbackAnalyticsHasEmptyBreakdowns", testFallbackAnalyticsHasEmptyBreakdowns),
     ("testRefreshFallsBackToSpendLogsWhenDailyActivityIsUnauthorized", testRefreshFallsBackToSpendLogsWhenDailyActivityIsUnauthorized),
     ("testReturnsStaleSnapshotOnTransientAPIFailure", testReturnsStaleSnapshotOnTransientAPIFailure),
+    ("testSpendServiceStaleCacheIsScopedByCredential", testSpendServiceStaleCacheIsScopedByCredential),
+    ("testSpendServiceStaleCacheIsScopedByBaseURL", testSpendServiceStaleCacheIsScopedByBaseURL),
     ("testAuthFailureReturnsAuthFailedWithoutRetrying", testAuthFailureReturnsAuthFailedWithoutRetrying),
     ("testMissingKeyReturnsSetupRequired", testMissingKeyReturnsSetupRequired),
     ("testMalformedResponseWithoutCacheReturnsFailed", testMalformedResponseWithoutCacheReturnsFailed),
     ("testUsesConfiguredSpendLimit", testUsesConfiguredSpendLimit),
+    ("testSpendServiceUsesPersistedSpendLimit", testSpendServiceUsesPersistedSpendLimit),
     ("testInitialRefreshLoadsTodaySnapshot", testInitialRefreshLoadsTodaySnapshot),
+    ("testChangingSpendLimitRefreshesPresentationWithoutNetwork", testChangingSpendLimitRefreshesPresentationWithoutNetwork),
+    ("testInvalidSpendLimitShowsSettingsError", testInvalidSpendLimitShowsSettingsError),
+    ("testInvalidBaseURLShowsSettingsError", testInvalidBaseURLShowsSettingsError),
+    ("testChangingBaseURLClearsSpendSnapshots", testChangingBaseURLClearsSpendSnapshots),
+    ("testChangingBaseURLPreservesSetupPauseState", testChangingBaseURLPreservesSetupPauseState),
+    ("testAPIKeyChangeClearsSpendSnapshots", testAPIKeyChangeClearsSpendSnapshots),
+    ("testClearingAPIKeyClearsSpendSnapshots", testClearingAPIKeyClearsSpendSnapshots),
+    ("testAPIKeyChangeClearsSpendServiceFallbackCache", testAPIKeyChangeClearsSpendServiceFallbackCache),
+    ("testInFlightRefreshDoesNotRepopulateAfterAPIKeyChange", testInFlightRefreshDoesNotRepopulateAfterAPIKeyChange),
     ("testSelectingRangeFetchesThatRange", testSelectingRangeFetchesThatRange),
     ("testTransientFailureKeepsStaleSnapshot", testTransientFailureKeepsStaleSnapshot),
     ("testViewModelStoresCurrentAnalyticsSummary", testViewModelStoresCurrentAnalyticsSummary),
@@ -2610,7 +3090,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testAPIKeyChangeClearsVisibleKeyContext", testAPIKeyChangeClearsVisibleKeyContext),
     ("testAPIKeyChangeClearsCachedUserContextForKeysMode", testAPIKeyChangeClearsCachedUserContextForKeysMode),
     ("testKeyAuthFailureClearsPreviousKeyContext", testKeyAuthFailureClearsPreviousKeyContext),
-    ("testKeyHardFailureClearsPreviousKeyContext", testKeyHardFailureClearsPreviousKeyContext)
+    ("testKeyHardFailureClearsPreviousKeyContext", testKeyHardFailureClearsPreviousKeyContext),
+    ("testSettingsModeCanClearAPIKey", testSettingsModeCanClearAPIKey)
 ]
 
 var failures: [String] = []
