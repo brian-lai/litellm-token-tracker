@@ -1,0 +1,118 @@
+import AppKit
+import Observation
+import SwiftUI
+import JWTokensCore
+
+@MainActor
+final class StatusItemController: NSObject {
+    private let viewModel: SpendDashboardViewModel
+    private let statusItem: NSStatusItem
+    private let popover = NSPopover()
+
+    init(viewModel: SpendDashboardViewModel) {
+        self.viewModel = viewModel
+        self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        super.init()
+        configureStatusItem()
+        configurePopover()
+        updateStatusItem()
+        observePresentation()
+    }
+
+    private func configureStatusItem() {
+        guard let button = statusItem.button else {
+            return
+        }
+        button.target = self
+        button.action = #selector(togglePopover)
+        button.imagePosition = .imageLeading
+        button.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+    }
+
+    private func configurePopover() {
+        popover.behavior = .transient
+        popover.contentSize = NSSize(width: 340, height: 520)
+        popover.contentViewController = NSHostingController(rootView: SpendPopoverView(viewModel: viewModel))
+    }
+
+    private func observePresentation() {
+        withObservationTracking {
+            _ = viewModel.menuBarPresentation
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.updateStatusItem()
+                self?.observePresentation()
+            }
+        }
+    }
+
+    private func updateStatusItem() {
+        let presentation = viewModel.menuBarPresentation
+        guard let button = statusItem.button else {
+            return
+        }
+        button.image = StatusRingImageRenderer.image(for: presentation)
+        button.title = " \(presentation.label)"
+        button.toolTip = presentation.accessibilityLabel
+        button.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        button.imagePosition = .imageLeading
+        button.sizeToFit()
+    }
+
+    @objc private func togglePopover() {
+        guard let button = statusItem.button else {
+            return
+        }
+        if popover.isShown {
+            popover.performClose(nil)
+        } else {
+            updateStatusItem()
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            popover.contentViewController?.view.window?.makeKey()
+        }
+    }
+}
+
+private enum StatusRingImageRenderer {
+    static func image(for presentation: MenuBarSpendPresentation) -> NSImage {
+        let size = NSSize(width: 14, height: 14)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        defer { image.unlockFocus() }
+
+        guard let context = NSGraphicsContext.current?.cgContext else {
+            return image
+        }
+
+        context.setLineWidth(2)
+        context.setLineCap(.round)
+        context.setStrokeColor(NSColor.secondaryLabelColor.withAlphaComponent(0.35).cgColor)
+
+        let rect = CGRect(x: 2, y: 2, width: 10, height: 10)
+        context.strokeEllipse(in: rect)
+
+        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+        let radius: CGFloat = 5
+        let start = CGFloat.pi / 2
+        let end = start - (CGFloat(min(1, max(0, presentation.progress))) * 2 * CGFloat.pi)
+        context.setStrokeColor(color(for: presentation.band).cgColor)
+        context.addArc(center: center, radius: radius, startAngle: start, endAngle: end, clockwise: true)
+        context.strokePath()
+
+        image.isTemplate = false
+        return image
+    }
+
+    private static func color(for band: SpendStatusBand) -> NSColor {
+        switch band.id {
+        case "yellow":
+            return NSColor.systemYellow
+        case "orange":
+            return NSColor.systemOrange
+        case "red":
+            return NSColor.systemRed
+        default:
+            return NSColor.systemGreen
+        }
+    }
+}

@@ -3,22 +3,34 @@ import JWTokensCore
 
 @main
 struct JWTokensApp: App {
-    @State private var viewModel = JWTokensApp.makeViewModel()
-    @State private var refreshCoordinator: SpendRefreshCoordinator?
+    @NSApplicationDelegateAdaptor(JWTokensAppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            SpendPopoverView(viewModel: viewModel)
-                .task {
-                    if refreshCoordinator == nil {
-                        let coordinator = SpendRefreshCoordinator(viewModel: viewModel)
-                        coordinator.start()
-                        refreshCoordinator = coordinator
-                    }
-                    await viewModel.refresh()
-                }
-        } label: {
-            MenuBarRingLabelView(presentation: viewModel.menuBarPresentation)
+        Settings {
+            EmptyView()
+        }
+    }
+}
+
+@MainActor
+final class JWTokensAppDelegate: NSObject, NSApplicationDelegate {
+    private var viewModel: SpendDashboardViewModel?
+    private var refreshCoordinator: SpendRefreshCoordinator?
+    private var statusItemController: StatusItemController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        let viewModel = Self.makeViewModel()
+        let coordinator = SpendRefreshCoordinator(viewModel: viewModel)
+        let controller = StatusItemController(viewModel: viewModel)
+
+        self.viewModel = viewModel
+        self.refreshCoordinator = coordinator
+        self.statusItemController = controller
+
+        coordinator.start()
+        Task {
+            await viewModel.refresh()
         }
     }
 
