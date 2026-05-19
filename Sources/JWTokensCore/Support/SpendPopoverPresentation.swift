@@ -1,5 +1,24 @@
 import Foundation
 
+public enum SpendPopoverMode: String, CaseIterable, Identifiable, Sendable {
+    case overview
+    case trends
+    case breakdown
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .overview:
+            return "Overview"
+        case .trends:
+            return "Trends"
+        case .breakdown:
+            return "Breakdown"
+        }
+    }
+}
+
 public struct SpendPopoverPresentation: Equatable, Sendable {
     public struct DetailRow: Equatable, Identifiable, Sendable {
         public let label: String

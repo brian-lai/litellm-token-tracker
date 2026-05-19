@@ -46,6 +46,7 @@ struct SpendPopoverView: View {
                 }
             }
             detailGrid(rows: presentation.detailRows)
+            modeSelector
             controlPanel
             if let statusText = presentation.statusText {
                 Text(statusText)
@@ -83,6 +84,19 @@ struct SpendPopoverView: View {
         VStack(spacing: 8) {
             rangeSelector
             metricSelector
+        }
+    }
+
+    private var modeSelector: some View {
+        HStack(spacing: 6) {
+            ForEach(SpendPopoverMode.allCases) { mode in
+                selectorButton(
+                    title: mode.displayName,
+                    isSelected: viewModel.selectedPopoverMode == mode
+                ) {
+                    viewModel.selectPopoverMode(mode)
+                }
+            }
         }
     }
 

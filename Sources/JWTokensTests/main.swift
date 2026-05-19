@@ -1665,6 +1665,29 @@ func testMetricSelectorShowsDollarsAndPercentOptions() throws {
 }
 
 @MainActor
+func testDefaultPopoverModeIsOverview() async throws {
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []))
+
+    try expectEqual(viewModel.selectedPopoverMode, .overview, "popover should default to overview mode")
+}
+
+@MainActor
+func testSelectingPopoverModeDoesNotRefreshSpend() async throws {
+    let service = RecordingSpendService(results: [])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    viewModel.selectPopoverMode(.breakdown)
+
+    try expectEqual(viewModel.selectedPopoverMode, .breakdown, "mode selection should update view state")
+    try expectEqual(service.requestedRanges, [], "mode selection should not refresh spend")
+}
+
+func testPopoverModesExposeOverviewTrendsBreakdown() throws {
+    try expectEqual(SpendPopoverMode.allCases, [.overview, .trends, .breakdown], "phase 2 should expose the first advanced modes")
+    try expectEqual(SpendPopoverMode.allCases.map(\.displayName), ["Overview", "Trends", "Breakdown"], "popover modes should have display names")
+}
+
+@MainActor
 func testChangingMetricDoesNotRefreshSpend() async throws {
     let service = RecordingSpendService(results: [])
     let viewModel = SpendDashboardViewModel(spendService: service)
@@ -1744,7 +1767,8 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testMenuBarPreferenceDefaultsToDollars", testMenuBarPreferenceDefaultsToDollars),
     ("testMenuBarPreferencePersistsPercentMetric", testMenuBarPreferencePersistsPercentMetric),
     ("testMenuBarPreferenceFallsBackOnInvalidRawValue", testMenuBarPreferenceFallsBackOnInvalidRawValue),
-    ("testMetricSelectorShowsDollarsAndPercentOptions", testMetricSelectorShowsDollarsAndPercentOptions)
+    ("testMetricSelectorShowsDollarsAndPercentOptions", testMetricSelectorShowsDollarsAndPercentOptions),
+    ("testPopoverModesExposeOverviewTrendsBreakdown", testPopoverModesExposeOverviewTrendsBreakdown)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [
@@ -1793,7 +1817,9 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testStaleFallbackMarksMenuBarAccessibilityStale", testStaleFallbackMarksMenuBarAccessibilityStale),
     ("testChangingMetricDoesNotRefreshSpend", testChangingMetricDoesNotRefreshSpend),
     ("testChangingMetricUpdatesMenuBarPresentation", testChangingMetricUpdatesMenuBarPresentation),
-    ("testMetricAndRangeControlsRemainIndependent", testMetricAndRangeControlsRemainIndependent)
+    ("testMetricAndRangeControlsRemainIndependent", testMetricAndRangeControlsRemainIndependent),
+    ("testDefaultPopoverModeIsOverview", testDefaultPopoverModeIsOverview),
+    ("testSelectingPopoverModeDoesNotRefreshSpend", testSelectingPopoverModeDoesNotRefreshSpend)
 ]
 
 var failures: [String] = []
