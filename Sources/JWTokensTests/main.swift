@@ -816,6 +816,7 @@ func testDailyChartPresentationSupportsEmptyPoints() throws {
 
     try expect(presentation.isEmpty, "empty chart presentation should be explicit")
     try expectEqual(presentation.bars.count, 0, "empty chart should have no bars")
+    try expectEqual(presentation.accessibilityLabel, "Daily spend chart, no daily spend", "empty chart should have accessible summary")
 }
 
 func testDailyChartPresentationScalesThirtyPoints() throws {
@@ -826,6 +827,7 @@ func testDailyChartPresentationScalesThirtyPoints() throws {
 
     try expectEqual(presentation.bars.count, 30, "chart should support thirty daily points")
     try expectEqual(presentation.bars.last?.heightRatio, 1, "largest point should scale to full height")
+    try expect(presentation.accessibilityLabel.contains("30 days"), "chart accessibility should include day count")
 }
 
 @MainActor

@@ -11,8 +11,11 @@ struct DailySpendChartView: View {
                 .foregroundStyle(.secondary)
                 .frame(height: 80)
                 .frame(maxWidth: .infinity)
+                .accessibilityLabel(presentation.accessibilityLabel)
         } else {
             bars
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(presentation.accessibilityLabel)
         }
     }
 
@@ -22,7 +25,7 @@ struct DailySpendChartView: View {
                 VStack(spacing: 3) {
                     Spacer(minLength: 0)
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(color(for: bar.band))
+                        .fill(.cyan.opacity(0.85))
                         .frame(height: max(2, 72 * bar.heightRatio))
                         .help(bar.amountText)
                 }
@@ -31,18 +34,5 @@ struct DailySpendChartView: View {
         }
         .frame(height: 80)
         .frame(maxWidth: .infinity)
-    }
-
-    private func color(for band: SpendStatusBand) -> Color {
-        switch band.id {
-        case "yellow":
-            return .yellow.opacity(0.85)
-        case "orange":
-            return .orange.opacity(0.9)
-        case "red":
-            return .red.opacity(0.9)
-        default:
-            return .cyan.opacity(0.85)
-        }
     }
 }

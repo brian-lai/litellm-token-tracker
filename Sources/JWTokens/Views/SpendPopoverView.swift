@@ -65,6 +65,8 @@ struct SpendPopoverView: View {
         .frame(width: 340, alignment: .leading)
         .padding(14)
         .background(.black.opacity(0.84))
+        .foregroundStyle(.white)
+        .preferredColorScheme(.dark)
     }
 
     private var controlPanel: some View {

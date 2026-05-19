@@ -19,12 +19,14 @@ struct SpendGaugeView: View {
                 Text(presentation.label)
                     .font(.system(size: 26, weight: .semibold, design: .rounded))
                     .monospacedDigit()
+                    .foregroundStyle(.white)
                 Text(presentation.band.accessibleName.uppercased())
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
             }
         }
         .frame(width: 132, height: 132)
+        .preferredColorScheme(.dark)
         .accessibilityLabel(presentation.accessibilityLabel)
     }
 
