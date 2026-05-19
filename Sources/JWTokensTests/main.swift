@@ -2255,6 +2255,21 @@ func testAPIKeyChangeClearsVisibleKeyContext() async throws {
     try expectEqual(viewModel.keyContextSnapshot, nil, "visible key context should clear when API key changes")
 }
 
+@MainActor
+func testAPIKeyChangeClearsCachedUserContextForKeysMode() async throws {
+    let user = LiteLLMUserContext(userID: "old-user", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)
+    let spendSnapshot = SpendSnapshot(range: .today, totalSpendUSD: 8, limitUSD: 80, percentOfLimit: Decimal(string: "0.1")!, dailyPoints: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false, userContext: user)
+    let keyService = RecordingKeyContextService(results: [.refreshed(KeyContextSnapshot(currentKey: nil, ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false))])
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: [.refreshed(spendSnapshot)]), keyContextService: keyService)
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    viewModel.apiKeyDidChange()
+    await viewModel.selectPopoverMode(.keys, now: try fixedDate("2026-05-18"))
+
+    try expectEqual(viewModel.userContext, nil, "API key changes should clear cached user context")
+    try expectEqual(keyService.requestedUserContexts.first!, nil, "Keys mode should not pass stale user context after API key changes")
+}
+
 func testKeysModeShowsCurrentKeyAlias() throws {
     let snapshot = KeyContextSnapshot(currentKey: keySummary(alias: "Claude Code", spend: 65), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
     let presentation = KeyBudgetPresentation.make(snapshot: snapshot, errorMessage: nil, calendar: fixedCalendar())
@@ -2489,7 +2504,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testKeyContextFailurePreservesSpendSnapshot", testKeyContextFailurePreservesSpendSnapshot),
     ("testReenteringKeysAfterFiveMinutesRequestsKeyRefresh", testReenteringKeysAfterFiveMinutesRequestsKeyRefresh),
     ("testManualRefreshInKeysRefreshesKeyContext", testManualRefreshInKeysRefreshesKeyContext),
-    ("testAPIKeyChangeClearsVisibleKeyContext", testAPIKeyChangeClearsVisibleKeyContext)
+    ("testAPIKeyChangeClearsVisibleKeyContext", testAPIKeyChangeClearsVisibleKeyContext),
+    ("testAPIKeyChangeClearsCachedUserContextForKeysMode", testAPIKeyChangeClearsCachedUserContextForKeysMode)
 ]
 
 var failures: [String] = []

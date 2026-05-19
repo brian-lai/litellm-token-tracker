@@ -132,6 +132,7 @@ public final class SpendDashboardViewModel {
         requiresSetup = false
         keyContextSnapshot = nil
         keyContextErrorMessage = nil
+        userContext = nil
         keyContextService?.clearCache()
     }
 
