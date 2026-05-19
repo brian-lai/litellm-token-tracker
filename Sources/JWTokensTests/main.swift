@@ -823,6 +823,13 @@ func temporaryAPIKeyFileURL() -> URL {
         .appendingPathComponent("litellm_api_key", isDirectory: false)
 }
 
+func temporaryConfigurationFileURL() -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent("jw_tokens_tests", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        .appendingPathComponent("config.json", isDirectory: false)
+}
+
 func permissions(at url: URL) throws -> Int {
     let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
     guard let value = attributes[.posixPermissions] as? NSNumber else {
@@ -835,6 +842,40 @@ func testDoesNotExposeKeyInErrorDescription() throws {
     let errorDescription = APIKeyStoreError.unavailable.description
 
     try expect(!errorDescription.contains("secret-token"), "error description should not expose API keys")
+}
+
+func testConfigurationStorePersistsSpendLimit() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    let store = LocalAppConfigurationStore(fileURL: fileURL)
+
+    try store.saveConfiguration(AppConfiguration(spendLimitUSD: 125))
+    let configuration = try store.loadConfiguration()
+
+    try expectEqual(configuration.spendLimitUSD, 125, "configuration store should persist spend limit")
+    try expectEqual(try permissions(at: fileURL), 0o600, "configuration file should be private by default")
+}
+
+func testConfigurationStorePersistsBaseURL() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    let store = LocalAppConfigurationStore(fileURL: fileURL)
+    let baseURL = URL(string: "https://litellm.example.internal")!
+
+    try store.saveConfiguration(AppConfiguration(baseURL: baseURL, spendLimitUSD: 80))
+    let configuration = try store.loadConfiguration()
+
+    try expectEqual(configuration.baseURL, baseURL, "configuration store should persist base URL")
+}
+
+func testConfigurationStoreFallsBackOnInvalidValues() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"baseURL":"not-a-url","spendLimitUSD":"-1"}"#.utf8).write(to: fileURL)
+    let defaults = AppConfiguration(baseURL: URL(string: "https://litellm.justworksai.net")!, spendLimitUSD: 80)
+    let store = LocalAppConfigurationStore(fileURL: fileURL, defaults: defaults)
+
+    let configuration = try store.loadConfiguration()
+
+    try expectEqual(configuration, defaults, "invalid configuration values should fall back to defaults")
 }
 
 func testRefreshFetchesUserThenTodaySpend() async throws {
@@ -2487,6 +2528,9 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testLocalFileAPIKeyStoreMissingFileMapsToMissingKey", testLocalFileAPIKeyStoreMissingFileMapsToMissingKey),
     ("testLocalFileAPIKeyStoreUsesPrivatePermissions", testLocalFileAPIKeyStoreUsesPrivatePermissions),
     ("testDoesNotExposeKeyInErrorDescription", testDoesNotExposeKeyInErrorDescription),
+    ("testConfigurationStorePersistsSpendLimit", testConfigurationStorePersistsSpendLimit),
+    ("testConfigurationStorePersistsBaseURL", testConfigurationStorePersistsBaseURL),
+    ("testConfigurationStoreFallsBackOnInvalidValues", testConfigurationStoreFallsBackOnInvalidValues),
     ("testDefaultTitleShowsTodaySpendAndLimitPercent", testDefaultTitleShowsTodaySpendAndLimitPercent),
     ("testSetupStateUsesCompactTitle", testSetupStateUsesCompactTitle),
     ("testShowsAllFiveRanges", testShowsAllFiveRanges),
