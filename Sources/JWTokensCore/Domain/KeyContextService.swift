@@ -53,15 +53,17 @@ public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
     }
 
     public func refresh(userContext: LiteLLMUserContext?, now: Date) async -> KeyContextResult {
+        var currentScope: String?
         do {
             let apiKey = try apiKeyStore.readAPIKey()
             let configuration = try configurationStore.loadConfiguration()
             let scope = cacheScope(baseURL: configuration.baseURL, apiKey: apiKey)
+            currentScope = scope
             if let cached = loadFreshCache(now: now, scope: scope) {
                 return .refreshed(cached)
             }
             let client = clientFactory(configuration.baseURL, apiKey)
-            let user = try await resolvedUserContext(userContext, client: client)
+            let user = try await resolvedUserContext(userContext, client: client, scope: scope)
             let currentKey = try await client.fetchCurrentKey()
             let ownedKeys = try await client.fetchUserKeys(userID: user.userID)
             let snapshot = KeyContextSnapshot(currentKey: currentKey, ownedKeys: ownedKeys, refreshedAt: now, isStale: false)
@@ -70,7 +72,7 @@ public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
         } catch LiteLLMClientError.unauthorized {
             return .authFailed(message: "LiteLLM key context was rejected")
         } catch {
-            if let stale = loadAnyCache() {
+            if let currentScope, let stale = loadAnyCache(scope: currentScope) {
                 return .stale(stale.markingStale(), message: "Showing last known key context")
             }
             return .failed(message: "Unable to load key context")
@@ -85,11 +87,11 @@ public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
         cachedScope = nil
     }
 
-    private func resolvedUserContext(_ userContext: LiteLLMUserContext?, client: LiteLLMClientProtocol) async throws -> LiteLLMUserContext {
+    private func resolvedUserContext(_ userContext: LiteLLMUserContext?, client: LiteLLMClientProtocol, scope: String) async throws -> LiteLLMUserContext {
         if let userContext {
             return userContext
         }
-        if let cached = loadCachedUserContext() {
+        if let cached = loadCachedUserContext(scope: scope) {
             return cached
         }
         return try await client.fetchCurrentUser()
@@ -104,15 +106,21 @@ public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
         return cachedSnapshot
     }
 
-    private func loadAnyCache() -> KeyContextSnapshot? {
+    private func loadAnyCache(scope: String) -> KeyContextSnapshot? {
         lock.lock()
         defer { lock.unlock() }
+        guard cachedScope == scope else {
+            return nil
+        }
         return cachedSnapshot
     }
 
-    private func loadCachedUserContext() -> LiteLLMUserContext? {
+    private func loadCachedUserContext(scope: String) -> LiteLLMUserContext? {
         lock.lock()
         defer { lock.unlock() }
+        guard cachedScope == scope else {
+            return nil
+        }
         return cachedUserContext
     }
 

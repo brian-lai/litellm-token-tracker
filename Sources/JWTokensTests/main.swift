@@ -2193,6 +2193,57 @@ func testKeyContextCacheIsScopedByCredential() async throws {
     try expectEqual(snapshot.currentKey?.alias, "Second", "key context cache should not leak across credentials")
 }
 
+func testKeyContextDoesNotReturnStaleAcrossCredentialChangeOnFailure() async throws {
+    let store = MutableAPIKeyStore()
+    try store.saveAPIKey("first-key")
+    let firstClient = RecordingKeyClient(
+        userResult: .success(LiteLLMUserContext(userID: "first-user", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        currentKeyResult: .success(keySummary(alias: "First", spend: 1)),
+        userKeysResult: .success([])
+    )
+    let secondClient = RecordingKeyClient(
+        userResult: .success(LiteLLMUserContext(userID: "second-user", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        currentKeyResult: .failure(LiteLLMClientError.unavailable),
+        userKeysResult: .success([])
+    )
+    let service = KeyContextService(apiKeyStore: store, clientFactory: { _, apiKey in
+        apiKey == "first-key" ? firstClient : secondClient
+    })
+
+    _ = await service.refresh(userContext: nil, now: try fixedDate("2026-05-18"))
+    try store.saveAPIKey("second-key")
+    let result = await service.refresh(userContext: nil, now: try fixedDate("2026-05-18").addingTimeInterval(301))
+
+    guard case .failed = result else {
+        throw TestFailure(description: "credential-scoped key context should not return another credential's stale snapshot")
+    }
+}
+
+func testCachedUserContextIsScopedByCredential() async throws {
+    let store = MutableAPIKeyStore()
+    try store.saveAPIKey("first-key")
+    let firstClient = RecordingKeyClient(
+        userResult: .success(LiteLLMUserContext(userID: "first-user", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        currentKeyResult: .success(keySummary(alias: "First", spend: 1)),
+        userKeysResult: .success([])
+    )
+    let secondClient = RecordingKeyClient(
+        userResult: .success(LiteLLMUserContext(userID: "second-user", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        currentKeyResult: .success(keySummary(alias: "Second", spend: 2)),
+        userKeysResult: .success([])
+    )
+    let service = KeyContextService(apiKeyStore: store, clientFactory: { _, apiKey in
+        apiKey == "first-key" ? firstClient : secondClient
+    })
+
+    _ = await service.refresh(userContext: nil, now: try fixedDate("2026-05-18"))
+    try store.saveAPIKey("second-key")
+    _ = await service.refresh(userContext: nil, now: try fixedDate("2026-05-18").addingTimeInterval(60))
+
+    try expectEqual(secondClient.currentUserCalls, 1, "new credential should fetch its own user context")
+    try expectEqual(secondClient.userKeyCalls, ["second-user"], "new credential should use its own user id for key list")
+}
+
 @MainActor
 func testAPIKeyChangeClearsVisibleKeyContext() async throws {
     let snapshot = KeyContextSnapshot(currentKey: keySummary(alias: "First", spend: 1), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
@@ -2225,6 +2276,21 @@ func testKeysModeRanksOwnedKeysBySpend() throws {
     let presentation = KeyBudgetPresentation.make(snapshot: snapshot, errorMessage: nil, calendar: fixedCalendar())
 
     try expectEqual(presentation.ownedKeys.map(\.name), ["Large", "Small"], "owned keys should rank by spend")
+}
+
+func testKeysModeRowsHaveStableIDsForDuplicateNames() throws {
+    let snapshot = KeyContextSnapshot(
+        currentKey: nil,
+        ownedKeys: [
+            keySummary(alias: "Duplicate", spend: 2),
+            keySummary(alias: "Duplicate", spend: 1)
+        ],
+        refreshedAt: try fixedDate("2026-05-18"),
+        isStale: false
+    )
+    let presentation = KeyBudgetPresentation.make(snapshot: snapshot, errorMessage: nil, calendar: fixedCalendar())
+
+    try expectEqual(Set(presentation.ownedKeys.map(\.id)).count, 2, "duplicate key display names should still have distinct row ids")
 }
 
 func testKeysModeShowsBudgetResetContext() throws {
@@ -2341,6 +2407,7 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testPreviewFixtureIncludesEmptyBreakdownAndFallbackSource", testPreviewFixtureIncludesEmptyBreakdownAndFallbackSource),
     ("testKeysModeShowsCurrentKeyAlias", testKeysModeShowsCurrentKeyAlias),
     ("testKeysModeRanksOwnedKeysBySpend", testKeysModeRanksOwnedKeysBySpend),
+    ("testKeysModeRowsHaveStableIDsForDuplicateNames", testKeysModeRowsHaveStableIDsForDuplicateNames),
     ("testKeysModeShowsBudgetResetContext", testKeysModeShowsBudgetResetContext),
     ("testKeysModeShowsScopedError", testKeysModeShowsScopedError),
     ("testSpendStatusBandThresholds", testSpendStatusBandThresholds),
@@ -2375,6 +2442,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testKeyContextUsesStaleValueWhenAvailable", testKeyContextUsesStaleValueWhenAvailable),
     ("testKeyContextCacheExpiresAfterFiveMinutes", testKeyContextCacheExpiresAfterFiveMinutes),
     ("testKeyContextCacheIsScopedByCredential", testKeyContextCacheIsScopedByCredential),
+    ("testKeyContextDoesNotReturnStaleAcrossCredentialChangeOnFailure", testKeyContextDoesNotReturnStaleAcrossCredentialChangeOnFailure),
+    ("testCachedUserContextIsScopedByCredential", testCachedUserContextIsScopedByCredential),
     ("testRefreshFetchesUserThenTodaySpend", testRefreshFetchesUserThenTodaySpend),
     ("testRefreshPrefersDailyActivitySummary", testRefreshPrefersDailyActivitySummary),
     ("testRefreshMarksActivitySource", testRefreshMarksActivitySource),

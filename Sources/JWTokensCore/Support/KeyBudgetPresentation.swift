@@ -2,12 +2,11 @@ import Foundation
 
 public struct KeyBudgetPresentation: Equatable, Sendable {
     public struct KeyRow: Equatable, Identifiable, Sendable {
+        public let id: String
         public let name: String
         public let spendText: String
         public let budgetText: String?
         public let lastActiveText: String?
-
-        public var id: String { name }
     }
 
     public let currentKeyName: String
@@ -39,8 +38,10 @@ public struct KeyBudgetPresentation: Equatable, Sendable {
             currentKeyResetText: resetText(for: currentKey?.budgetResetAt, calendar: calendar),
             ownedKeys: snapshot.ownedKeys
                 .sorted { $0.spendUSD > $1.spendUSD }
-                .map { key in
+                .enumerated()
+                .map { index, key in
                     KeyRow(
+                        id: "\(index)-\(key.displayName)",
                         name: key.displayName,
                         spendText: MenuBarTitleFormatter.currency(key.spendUSD),
                         budgetText: budgetText(for: key),
