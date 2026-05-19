@@ -22,9 +22,12 @@ public struct SpendService: SpendServicing {
     }
 
     public func refresh(range: SpendRange, now: Date, calendar: Calendar) async -> SpendRefreshResult {
+        var currentScope: String?
         do {
             let apiKey = try apiKeyStore.readAPIKey()
             let configuration = try configurationStore.loadConfiguration()
+            let scope = cacheScope(baseURL: configuration.baseURL, apiKey: apiKey)
+            currentScope = scope
             let client = clientFactory(configuration.baseURL, apiKey)
             let user = try await client.fetchCurrentUser()
             let dateRange = rangeResolver.dateRange(for: range, now: now, calendar: calendar)
@@ -68,14 +71,14 @@ public struct SpendService: SpendServicing {
                     userContext: user
                 )
             }
-            try? cache.saveSnapshot(snapshot)
+            try? cache.saveSnapshot(snapshot, scope: scope)
             return .refreshed(snapshot)
         } catch APIKeyStoreError.missingKey {
             return .setupRequired(message: "LiteLLM API key is missing")
         } catch LiteLLMClientError.unauthorized {
             return .authFailed(message: "LiteLLM API key was rejected")
         } catch {
-            if let stale = try? cache.loadSnapshot(for: range) {
+            if let currentScope, let stale = try? cache.loadSnapshot(for: range, scope: currentScope) {
                 return .stale(stale.markingStale(), message: "Showing last known spend")
             }
             return .failed(message: "Unable to refresh spend")
@@ -84,5 +87,9 @@ public struct SpendService: SpendServicing {
 
     public func clearCache() {
         cache.clearSnapshots()
+    }
+
+    private func cacheScope(baseURL: URL, apiKey: String) -> String {
+        "\(baseURL.absoluteString)|\(apiKey.hashValue)"
     }
 }

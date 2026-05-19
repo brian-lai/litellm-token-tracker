@@ -9,6 +9,7 @@ public final class SpendDashboardViewModel {
     private let apiKeyStore: APIKeyStoring?
     private let menuBarPreferenceStore: MenuBarPreferenceStoring?
     private let configurationStore: MutableAppConfigurationStoring?
+    private var endpointStateGeneration = 0
 
     public var selectedRange: SpendRange = .today
     public var currentSnapshot: SpendSnapshot?
@@ -66,19 +67,29 @@ public final class SpendDashboardViewModel {
         guard !isRefreshing else {
             return
         }
+        let refreshGeneration = endpointStateGeneration
         isRefreshing = true
         defer { isRefreshing = false }
 
         if isAutomatic && selectedRange != .today {
             let todayResult = await spendService.refresh(range: .today, now: now, calendar: calendar)
+            guard refreshGeneration == endpointStateGeneration else {
+                return
+            }
             apply(todayResult, toMenuBarSnapshot: true, toCurrentSnapshot: false)
             if pausesAutomaticRefresh {
                 return
             }
             let selectedResult = await spendService.refresh(range: selectedRange, now: now, calendar: calendar)
+            guard refreshGeneration == endpointStateGeneration else {
+                return
+            }
             apply(selectedResult, toMenuBarSnapshot: false, toCurrentSnapshot: true)
         } else {
             let result = await spendService.refresh(range: selectedRange, now: now, calendar: calendar)
+            guard refreshGeneration == endpointStateGeneration else {
+                return
+            }
             let isToday = selectedRange == .today
             apply(result, toMenuBarSnapshot: isToday, toCurrentSnapshot: true)
         }
@@ -280,6 +291,7 @@ public final class SpendDashboardViewModel {
     }
 
     private func clearEndpointScopedState() {
+        endpointStateGeneration += 1
         clearSpendSnapshots()
         spendService.clearCache()
         keyContextSnapshot = nil

@@ -145,6 +145,45 @@ struct FakeClient: LiteLLMClientProtocol {
     }
 }
 
+final class MutableFakeClient: LiteLLMClientProtocol, @unchecked Sendable {
+    var userResult: Result<LiteLLMUserContext, Error>
+    var activityResult: Result<SpendAnalyticsSummary, Error>?
+    var rowsResult: Result<[SpendLogSummaryRow], Error>
+
+    init(
+        userResult: Result<LiteLLMUserContext, Error>,
+        activityResult: Result<SpendAnalyticsSummary, Error>? = nil,
+        rowsResult: Result<[SpendLogSummaryRow], Error>
+    ) {
+        self.userResult = userResult
+        self.activityResult = activityResult
+        self.rowsResult = rowsResult
+    }
+
+    func fetchCurrentUser() async throws -> LiteLLMUserContext {
+        try userResult.get()
+    }
+
+    func fetchUserDailyActivity(range: DateRange, userID: String) async throws -> SpendAnalyticsSummary {
+        if let activityResult {
+            return try activityResult.get()
+        }
+        throw LiteLLMClientError.unavailable
+    }
+
+    func fetchSpendRows(range: DateRange, userID: String) async throws -> [SpendLogSummaryRow] {
+        try rowsResult.get()
+    }
+
+    func fetchCurrentKey() async throws -> KeySpendSummary {
+        throw LiteLLMClientError.unavailable
+    }
+
+    func fetchUserKeys(userID: String) async throws -> [KeySpendSummary] {
+        throw LiteLLMClientError.unavailable
+    }
+}
+
 final class RecordingSpendService: SpendServicing, @unchecked Sendable {
     var results: [SpendRefreshResult]
     var requestedRanges: [SpendRange] = []
@@ -1077,20 +1116,19 @@ func testRefreshFallsBackToSpendLogsWhenDailyActivityIsUnauthorized() async thro
 }
 
 func testReturnsStaleSnapshotOnTransientAPIFailure() async throws {
-    let stale = SpendSnapshot(range: .today, totalSpendUSD: 5, limitUSD: 80, percentOfLimit: Decimal(string: "0.0625")!, dailyPoints: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
     let cache = InMemorySpendSnapshotCache()
-    try cache.saveSnapshot(stale)
+    let client = MutableFakeClient(
+        userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        rowsResult: .success([SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: 5)])
+    )
     let service = SpendService(
         apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
-        clientFactory: { _, _ in
-            FakeClient(
-                userResult: .failure(LiteLLMClientError.unavailable),
-                rowsResult: .success([])
-            )
-        },
+        clientFactory: { _, _ in client },
         cache: cache
     )
 
+    _ = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    client.userResult = .failure(LiteLLMClientError.unavailable)
     let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
 
     guard case let .stale(snapshot, _) = result else {
@@ -1098,6 +1136,58 @@ func testReturnsStaleSnapshotOnTransientAPIFailure() async throws {
     }
     try expectEqual(snapshot.totalSpendUSD, 5, "service should return cached stale spend")
     try expect(snapshot.isStale, "service should mark cached fallback snapshots stale")
+}
+
+func testSpendServiceStaleCacheIsScopedByCredential() async throws {
+    let store = MutableAPIKeyStore()
+    try store.saveAPIKey("first-key")
+    let firstClient = FakeClient(
+        userResult: .success(LiteLLMUserContext(userID: "first-user", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        rowsResult: .success([SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: 12)])
+    )
+    let secondClient = FakeClient(
+        userResult: .failure(LiteLLMClientError.unavailable),
+        rowsResult: .success([])
+    )
+    let service = SpendService(apiKeyStore: store, clientFactory: { _, apiKey in
+        apiKey == "first-key" ? firstClient : secondClient
+    })
+
+    _ = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    try store.saveAPIKey("second-key")
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18").addingTimeInterval(60), calendar: fixedCalendar())
+
+    guard case .failed = result else {
+        throw TestFailure(description: "spend service should not return another credential's stale spend")
+    }
+}
+
+func testSpendServiceStaleCacheIsScopedByBaseURL() async throws {
+    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://first.example.internal")!, spendLimitUSD: 80))
+    let firstClient = FakeClient(
+        userResult: .success(LiteLLMUserContext(userID: "first-user", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        rowsResult: .success([SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: 12)])
+    )
+    let secondClient = FakeClient(
+        userResult: .failure(LiteLLMClientError.unavailable),
+        rowsResult: .success([])
+    )
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: configurationStore,
+        clientFactory: { baseURL, _ in
+            baseURL.host == "first.example.internal" ? firstClient : secondClient
+        }
+    )
+
+    _ = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://second.example.internal")!, spendLimitUSD: 80))
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18").addingTimeInterval(60), calendar: fixedCalendar())
+
+    guard case .failed = result else {
+        throw TestFailure(description: "spend service should not return another base URL's stale spend")
+    }
 }
 
 func testAuthFailureReturnsAuthFailedWithoutRetrying() async throws {
@@ -1338,6 +1428,23 @@ func testAPIKeyChangeClearsSpendServiceFallbackCache() async throws {
 
     try expectEqual(viewModel.currentSnapshot, nil, "API key changes should clear spend service fallback cache")
     try expectEqual(viewModel.errorMessage, "Unable to refresh spend", "new credential transient failure should not show old credential stale spend")
+}
+
+@MainActor
+func testInFlightRefreshDoesNotRepopulateAfterAPIKeyChange() async throws {
+    let service = SuspendingSpendService()
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    async let refresh: Void = viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    while await service.callCount == 0 {
+        await Task.yield()
+    }
+    viewModel.apiKeyDidChange()
+    await service.resume(with: .refreshed(try snapshot(range: .today, total: 12)))
+    try await refresh
+
+    try expectEqual(viewModel.currentSnapshot, nil, "in-flight old credential refresh should not repopulate current spend")
+    try expectEqual(viewModel.menuBarSnapshot, nil, "in-flight old credential refresh should not repopulate menu bar spend")
 }
 
 func analyticsSummary(totalSpendUSD: Decimal, dailyPoints: [DailySpendPoint], source: SpendDataSource = .userDailyActivity) -> SpendAnalyticsSummary {
@@ -2123,21 +2230,20 @@ func testAuthFailurePreservesMenuBarSnapshot() async throws {
 
 @MainActor
 func testStaleFallbackMarksMenuBarAccessibilityStale() async throws {
-    let stale = try snapshot(range: .today, total: 5, isStale: false)
     let cache = InMemorySpendSnapshotCache()
-    try cache.saveSnapshot(stale)
+    let client = MutableFakeClient(
+        userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        rowsResult: .success([SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: 5)])
+    )
     let service = SpendService(
         apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
-        clientFactory: { _, _ in
-            FakeClient(
-                userResult: .failure(LiteLLMClientError.unavailable),
-                rowsResult: .success([])
-            )
-        },
+        clientFactory: { _, _ in client },
         cache: cache
     )
     let viewModel = SpendDashboardViewModel(spendService: service)
 
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    client.userResult = .failure(LiteLLMClientError.unavailable)
     await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
 
     try expect(viewModel.menuBarSnapshot?.isStale == true, "view model should store stale-marked cached fallback")
@@ -2932,6 +3038,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testFallbackAnalyticsHasEmptyBreakdowns", testFallbackAnalyticsHasEmptyBreakdowns),
     ("testRefreshFallsBackToSpendLogsWhenDailyActivityIsUnauthorized", testRefreshFallsBackToSpendLogsWhenDailyActivityIsUnauthorized),
     ("testReturnsStaleSnapshotOnTransientAPIFailure", testReturnsStaleSnapshotOnTransientAPIFailure),
+    ("testSpendServiceStaleCacheIsScopedByCredential", testSpendServiceStaleCacheIsScopedByCredential),
+    ("testSpendServiceStaleCacheIsScopedByBaseURL", testSpendServiceStaleCacheIsScopedByBaseURL),
     ("testAuthFailureReturnsAuthFailedWithoutRetrying", testAuthFailureReturnsAuthFailedWithoutRetrying),
     ("testMissingKeyReturnsSetupRequired", testMissingKeyReturnsSetupRequired),
     ("testMalformedResponseWithoutCacheReturnsFailed", testMalformedResponseWithoutCacheReturnsFailed),
@@ -2946,6 +3054,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testAPIKeyChangeClearsSpendSnapshots", testAPIKeyChangeClearsSpendSnapshots),
     ("testClearingAPIKeyClearsSpendSnapshots", testClearingAPIKeyClearsSpendSnapshots),
     ("testAPIKeyChangeClearsSpendServiceFallbackCache", testAPIKeyChangeClearsSpendServiceFallbackCache),
+    ("testInFlightRefreshDoesNotRepopulateAfterAPIKeyChange", testInFlightRefreshDoesNotRepopulateAfterAPIKeyChange),
     ("testSelectingRangeFetchesThatRange", testSelectingRangeFetchesThatRange),
     ("testTransientFailureKeepsStaleSnapshot", testTransientFailureKeepsStaleSnapshot),
     ("testViewModelStoresCurrentAnalyticsSummary", testViewModelStoresCurrentAnalyticsSummary),
