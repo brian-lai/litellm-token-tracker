@@ -116,14 +116,14 @@ final class FakeMenuBarPreferenceStore: MenuBarPreferenceStoring, @unchecked Sen
 
 struct FakeClient: LiteLLMClientProtocol {
     var userResult: Result<LiteLLMUserContext, Error>
-    var activityResult: Result<SpendActivitySummary, Error>?
+    var activityResult: Result<SpendAnalyticsSummary, Error>?
     var rowsResult: Result<[SpendLogSummaryRow], Error>
 
     func fetchCurrentUser() async throws -> LiteLLMUserContext {
         try userResult.get()
     }
 
-    func fetchUserDailyActivity(range: DateRange, userID: String) async throws -> SpendActivitySummary {
+    func fetchUserDailyActivity(range: DateRange, userID: String) async throws -> SpendAnalyticsSummary {
         if let activityResult {
             return try activityResult.get()
         }
@@ -560,9 +560,9 @@ func testFetchUserDailyActivityDoesNotLogPayloads() async throws {
     let logger = CapturingLogger()
     let loader = StubURLLoader(data: try fixtureData("user-daily-activity.json"))
     let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader, logger: logger)
-    let summary = try await client.fetchUserDailyActivity(range: try utcDateRange(), userID: "user-123")
+    let analytics = try await client.fetchUserDailyActivity(range: try utcDateRange(), userID: "user-123")
 
-    try expectEqual(summary.totalSpendUSD, Decimal(string: "65.5663")!, "client should return decoded activity total")
+    try expectEqual(analytics.totalSpendUSD, Decimal(string: "65.5663")!, "client should return decoded activity total")
     try expect(!String(describing: logger.events).contains("65.5663"), "logs should not include raw spend payload values")
 }
 
@@ -676,7 +676,7 @@ func testRefreshFetchesUserThenTodaySpend() async throws {
 }
 
 func testRefreshPrefersDailyActivitySummary() async throws {
-    let activity = SpendActivitySummary(
+    let activity = analyticsSummary(
         totalSpendUSD: Decimal(string: "65.5663")!,
         dailyPoints: [
             DailySpendPoint(date: try fixedDate("2026-05-18"), spendUSD: Decimal(string: "48.498672049999996")!),
@@ -705,6 +705,29 @@ func testRefreshPrefersDailyActivitySummary() async throws {
     try expectEqual(snapshot.dailyPoints.count, 2, "activity points should be preserved for the chart")
 }
 
+func testRefreshMarksActivitySource() async throws {
+    let activity = analyticsSummary(totalSpendUSD: 12, dailyPoints: [
+        DailySpendPoint(date: try fixedDate("2026-05-18"), spendUSD: 12)
+    ])
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 100, maxBudgetUSD: nil, budgetResetAt: nil)),
+                activityResult: .success(activity),
+                rowsResult: .success([])
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "expected refreshed result")
+    }
+    try expectEqual(snapshot.analytics?.source, .userDailyActivity, "activity refresh should mark analytics source")
+}
+
 func testRefreshFallsBackToSpendLogsWhenDailyActivityUnavailable() async throws {
     let service = SpendService(
         apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
@@ -724,6 +747,46 @@ func testRefreshFallsBackToSpendLogsWhenDailyActivityUnavailable() async throws 
         throw TestFailure(description: "expected refreshed result")
     }
     try expectEqual(snapshot.totalSpendUSD, 8, "service should fall back to summarized spend logs")
+}
+
+func testRefreshMarksSpendLogsFallbackSource() async throws {
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 100, maxBudgetUSD: nil, budgetResetAt: nil)),
+                activityResult: .failure(LiteLLMClientError.unavailable),
+                rowsResult: .success([SpendLogSummaryRow(date: try! fixedDate("2026-05-18"), spendUSD: 8)])
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "expected refreshed result")
+    }
+    try expectEqual(snapshot.analytics?.source, .spendLogsFallback, "spend logs fallback should mark analytics source")
+}
+
+func testFallbackAnalyticsHasEmptyBreakdowns() async throws {
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 100, maxBudgetUSD: nil, budgetResetAt: nil)),
+                activityResult: .failure(LiteLLMClientError.unavailable),
+                rowsResult: .success([SpendLogSummaryRow(date: try! fixedDate("2026-05-18"), spendUSD: 8)])
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "expected refreshed result")
+    }
+    try expectEqual(snapshot.analytics?.breakdowns, [:], "fallback analytics should not invent breakdowns")
 }
 
 func testRefreshFallsBackToSpendLogsWhenDailyActivityIsUnauthorized() async throws {
@@ -858,6 +921,16 @@ func snapshot(range: SpendRange = .today, total: Decimal = 8, isStale: Bool = fa
     )
 }
 
+func analyticsSummary(totalSpendUSD: Decimal, dailyPoints: [DailySpendPoint], source: SpendDataSource = .userDailyActivity) -> SpendAnalyticsSummary {
+    SpendAnalyticsSummary(
+        totalSpendUSD: totalSpendUSD,
+        totals: .zero,
+        dailyPoints: dailyPoints.map { DailyActivityPoint(date: $0.date, spendUSD: $0.spendUSD, totals: .zero) },
+        breakdowns: [:],
+        source: source
+    )
+}
+
 @MainActor
 func testInitialRefreshLoadsTodaySnapshot() async throws {
     let expected = try snapshot(range: .today, total: 7)
@@ -895,6 +968,91 @@ func testTransientFailureKeepsStaleSnapshot() async throws {
 
     try expectEqual(viewModel.currentSnapshot, stale, "stale snapshot should remain visible")
     try expectEqual(viewModel.errorMessage, "Showing last known spend", "stale message should be shown")
+}
+
+@MainActor
+func testViewModelStoresCurrentAnalyticsSummary() async throws {
+    let analytics = analyticsSummary(totalSpendUSD: 13, dailyPoints: [
+        DailySpendPoint(date: try fixedDate("2026-05-18"), spendUSD: 13)
+    ])
+    let refreshed = SpendSnapshot(
+        range: .today,
+        totalSpendUSD: 13,
+        limitUSD: 80,
+        percentOfLimit: Decimal(string: "0.1625")!,
+        dailyPoints: analytics.activitySummary.dailyPoints,
+        refreshedAt: try fixedDate("2026-05-18"),
+        isStale: false,
+        analytics: analytics,
+        userContext: nil
+    )
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: [.refreshed(refreshed)]))
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.currentAnalyticsSummary, analytics, "view model should store analytics from refreshed snapshots")
+}
+
+@MainActor
+func testViewModelStoresUserContextFromRefresh() async throws {
+    let user = LiteLLMUserContext(userID: "user-123", email: "blai@example.com", totalSpendUSD: 100, maxBudgetUSD: nil, budgetResetAt: nil)
+    let refreshed = SpendSnapshot(
+        range: .today,
+        totalSpendUSD: 8,
+        limitUSD: 80,
+        percentOfLimit: Decimal(string: "0.1")!,
+        dailyPoints: [],
+        refreshedAt: try fixedDate("2026-05-18"),
+        isStale: false,
+        analytics: nil,
+        userContext: user
+    )
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: [.refreshed(refreshed)]))
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.userContext, user, "view model should store user context from refresh")
+}
+
+@MainActor
+func testMenuBarSnapshotStillUsesTodaySpend() async throws {
+    let today = try snapshot(range: .today, total: 8)
+    let last7 = try snapshot(range: .last7Days, total: 20)
+    let service = RecordingSpendService(results: [.refreshed(today), .refreshed(last7)])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    await viewModel.selectRange(.last7Days, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.menuBarSnapshot?.totalSpendUSD, 8, "menu bar snapshot should stay on today")
+    try expectEqual(viewModel.currentSnapshot?.totalSpendUSD, 20, "current snapshot should follow selected range")
+}
+
+@MainActor
+func testStaleAnalyticsDoesNotClearCurrentSnapshot() async throws {
+    let analytics = analyticsSummary(totalSpendUSD: 8, dailyPoints: [])
+    let current = SpendSnapshot(
+        range: .today,
+        totalSpendUSD: 8,
+        limitUSD: 80,
+        percentOfLimit: Decimal(string: "0.1")!,
+        dailyPoints: [],
+        refreshedAt: try fixedDate("2026-05-18"),
+        isStale: false,
+        analytics: analytics,
+        userContext: nil
+    )
+    let stale = current.markingStale()
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: [
+        .refreshed(current),
+        .stale(stale, message: "Showing last known spend")
+    ]))
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.currentSnapshot?.totalSpendUSD, 8, "stale result should preserve current spend")
+    try expectEqual(viewModel.currentAnalyticsSummary?.source, .staleCache, "stale result should mark analytics source as stale cache")
 }
 
 @MainActor
@@ -1579,7 +1737,10 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testFetchUserDailyActivityDoesNotLogPayloads", testFetchUserDailyActivityDoesNotLogPayloads),
     ("testRefreshFetchesUserThenTodaySpend", testRefreshFetchesUserThenTodaySpend),
     ("testRefreshPrefersDailyActivitySummary", testRefreshPrefersDailyActivitySummary),
+    ("testRefreshMarksActivitySource", testRefreshMarksActivitySource),
     ("testRefreshFallsBackToSpendLogsWhenDailyActivityUnavailable", testRefreshFallsBackToSpendLogsWhenDailyActivityUnavailable),
+    ("testRefreshMarksSpendLogsFallbackSource", testRefreshMarksSpendLogsFallbackSource),
+    ("testFallbackAnalyticsHasEmptyBreakdowns", testFallbackAnalyticsHasEmptyBreakdowns),
     ("testRefreshFallsBackToSpendLogsWhenDailyActivityIsUnauthorized", testRefreshFallsBackToSpendLogsWhenDailyActivityIsUnauthorized),
     ("testReturnsStaleSnapshotOnTransientAPIFailure", testReturnsStaleSnapshotOnTransientAPIFailure),
     ("testAuthFailureReturnsAuthFailedWithoutRetrying", testAuthFailureReturnsAuthFailedWithoutRetrying),
@@ -1589,6 +1750,10 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testInitialRefreshLoadsTodaySnapshot", testInitialRefreshLoadsTodaySnapshot),
     ("testSelectingRangeFetchesThatRange", testSelectingRangeFetchesThatRange),
     ("testTransientFailureKeepsStaleSnapshot", testTransientFailureKeepsStaleSnapshot),
+    ("testViewModelStoresCurrentAnalyticsSummary", testViewModelStoresCurrentAnalyticsSummary),
+    ("testViewModelStoresUserContextFromRefresh", testViewModelStoresUserContextFromRefresh),
+    ("testMenuBarSnapshotStillUsesTodaySpend", testMenuBarSnapshotStillUsesTodaySpend),
+    ("testStaleAnalyticsDoesNotClearCurrentSnapshot", testStaleAnalyticsDoesNotClearCurrentSnapshot),
     ("testAuthFailureShowsCredentialError", testAuthFailureShowsCredentialError),
     ("testSelectingSameRangeDoesNotRefreshAgain", testSelectingSameRangeDoesNotRefreshAgain),
     ("testMenuBarExtraUsesFormatterOutput", testMenuBarExtraUsesFormatterOutput),

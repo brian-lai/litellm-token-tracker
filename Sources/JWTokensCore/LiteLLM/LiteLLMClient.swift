@@ -9,7 +9,7 @@ public enum LiteLLMClientError: Error, Equatable {
 
 public protocol LiteLLMClientProtocol: Sendable {
     func fetchCurrentUser() async throws -> LiteLLMUserContext
-    func fetchUserDailyActivity(range: DateRange, userID: String) async throws -> SpendActivitySummary
+    func fetchUserDailyActivity(range: DateRange, userID: String) async throws -> SpendAnalyticsSummary
     func fetchSpendRows(range: DateRange, userID: String) async throws -> [SpendLogSummaryRow]
 }
 
@@ -42,14 +42,14 @@ public struct LiteLLMClient: LiteLLMClientProtocol {
         return result.rows
     }
 
-    public func fetchUserDailyActivity(range: DateRange, userID: String) async throws -> SpendActivitySummary {
+    public func fetchUserDailyActivity(range: DateRange, userID: String) async throws -> SpendAnalyticsSummary {
         let request = try makeUserDailyActivityRequest(range: range, userID: userID)
         let data = try await perform(request, endpoint: "/user/daily/activity").data
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = range.timeZone
         let result = try LiteLLMResponseDecoder.decodeUserDailyActivity(from: data, calendar: calendar)
         logger.log(AppLogEvent(correlationID: correlationID(), endpoint: "/user/daily/activity", rowCount: result.summary.dailyPoints.count, skippedRowCount: result.skippedRowCount))
-        return result.summary
+        return result.analytics
     }
 
     public func makeSpendRowsRequest(range: DateRange, userID: String) throws -> URLRequest {

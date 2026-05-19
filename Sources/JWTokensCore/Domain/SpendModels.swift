@@ -184,6 +184,16 @@ public struct SpendAnalyticsSummary: Equatable, Sendable {
     public var activitySummary: SpendActivitySummary {
         SpendActivitySummary(totalSpendUSD: totalSpendUSD, dailyPoints: dailyPoints.map(\.spendPoint))
     }
+
+    public func markingSource(_ source: SpendDataSource) -> SpendAnalyticsSummary {
+        SpendAnalyticsSummary(
+            totalSpendUSD: totalSpendUSD,
+            totals: totals,
+            dailyPoints: dailyPoints,
+            breakdowns: breakdowns,
+            source: source
+        )
+    }
 }
 
 public struct SpendSnapshot: Equatable, Sendable {
@@ -194,8 +204,20 @@ public struct SpendSnapshot: Equatable, Sendable {
     public let dailyPoints: [DailySpendPoint]
     public let refreshedAt: Date
     public let isStale: Bool
+    public let analytics: SpendAnalyticsSummary?
+    public let userContext: LiteLLMUserContext?
 
-    public init(range: SpendRange, totalSpendUSD: Decimal, limitUSD: Decimal, percentOfLimit: Decimal, dailyPoints: [DailySpendPoint], refreshedAt: Date, isStale: Bool) {
+    public init(
+        range: SpendRange,
+        totalSpendUSD: Decimal,
+        limitUSD: Decimal,
+        percentOfLimit: Decimal,
+        dailyPoints: [DailySpendPoint],
+        refreshedAt: Date,
+        isStale: Bool,
+        analytics: SpendAnalyticsSummary? = nil,
+        userContext: LiteLLMUserContext? = nil
+    ) {
         self.range = range
         self.totalSpendUSD = totalSpendUSD
         self.limitUSD = limitUSD
@@ -203,6 +225,8 @@ public struct SpendSnapshot: Equatable, Sendable {
         self.dailyPoints = dailyPoints
         self.refreshedAt = refreshedAt
         self.isStale = isStale
+        self.analytics = analytics
+        self.userContext = userContext
     }
 
     public func markingStale() -> SpendSnapshot {
@@ -213,7 +237,9 @@ public struct SpendSnapshot: Equatable, Sendable {
             percentOfLimit: percentOfLimit,
             dailyPoints: dailyPoints,
             refreshedAt: refreshedAt,
-            isStale: true
+            isStale: true,
+            analytics: analytics?.markingSource(.staleCache),
+            userContext: userContext
         )
     }
 }
@@ -235,6 +261,28 @@ public enum SpendAggregator {
             dailyPoints: activity.dailyPoints.sorted { $0.date < $1.date },
             refreshedAt: refreshedAt,
             isStale: isStale
+        )
+    }
+
+    public static func snapshot(
+        analytics: SpendAnalyticsSummary,
+        range: SpendRange,
+        limitUSD: Decimal,
+        refreshedAt: Date,
+        isStale: Bool = false,
+        userContext: LiteLLMUserContext? = nil
+    ) -> SpendSnapshot {
+        let percent = limitUSD == 0 ? 0 : analytics.totalSpendUSD / limitUSD
+        return SpendSnapshot(
+            range: range,
+            totalSpendUSD: analytics.totalSpendUSD,
+            limitUSD: limitUSD,
+            percentOfLimit: percent,
+            dailyPoints: analytics.dailyPoints.map(\.spendPoint).sorted { $0.date < $1.date },
+            refreshedAt: refreshedAt,
+            isStale: isStale,
+            analytics: analytics,
+            userContext: userContext
         )
     }
 
