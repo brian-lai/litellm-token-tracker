@@ -717,6 +717,29 @@ func testPopoverPresentationPreservesStaleStatus() throws {
     try expectEqual(presentation.statusText, "Showing last known spend", "popover should preserve stale message")
 }
 
+func testGaugePresentationUsesBandColor() throws {
+    let presentation = RingProgressPresentation.make(
+        snapshot: try snapshot(range: .today, total: 96),
+        metric: .dollars,
+        rangeName: "Today",
+        requiresSetup: false
+    )
+
+    try expectEqual(presentation.band.id, "red", "gauge should expose band for view color")
+}
+
+func testGaugeAccessibilityLabelIncludesRangeAndSpend() throws {
+    let presentation = RingProgressPresentation.make(
+        snapshot: try snapshot(range: .today, total: 40),
+        metric: .percent,
+        rangeName: "Today",
+        requiresSetup: false
+    )
+
+    try expect(presentation.accessibilityLabel.contains("Today"), "gauge accessibility should include range")
+    try expect(presentation.accessibilityLabel.contains("50%"), "gauge accessibility should include spend percent")
+}
+
 func testStaleSnapshotShowsTimestamp() throws {
     let presentation = SpendPopoverPresentation.make(
         range: .today,
@@ -1168,6 +1191,8 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testPopoverPresentationShowsLimitText", testPopoverPresentationShowsLimitText),
     ("testPopoverPresentationShowsOverLimitState", testPopoverPresentationShowsOverLimitState),
     ("testPopoverPresentationPreservesStaleStatus", testPopoverPresentationPreservesStaleStatus),
+    ("testGaugePresentationUsesBandColor", testGaugePresentationUsesBandColor),
+    ("testGaugeAccessibilityLabelIncludesRangeAndSpend", testGaugeAccessibilityLabelIncludesRangeAndSpend),
     ("testStaleSnapshotShowsTimestamp", testStaleSnapshotShowsTimestamp),
     ("testAuthErrorShowsKeyUpdateAction", testAuthErrorShowsKeyUpdateAction),
     ("testDailyChartRendersOneBarPerPoint", testDailyChartRendersOneBarPerPoint),
