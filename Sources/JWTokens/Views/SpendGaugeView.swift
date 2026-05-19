@@ -20,10 +20,16 @@ struct SpendGaugeView: View {
                     .font(.system(size: 26, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.45)
+                    .allowsTightening(true)
+                    .frame(width: 96)
                 Text(presentation.band.accessibleName.uppercased())
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
+            .frame(width: 104)
         }
         .frame(width: 132, height: 132)
         .preferredColorScheme(.dark)
