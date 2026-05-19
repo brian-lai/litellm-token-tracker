@@ -1345,6 +1345,55 @@ func testSpendServiceUsesPersistedSpendLimit() async throws {
     try expectEqual(snapshot.percentOfLimit, Decimal(string: "0.25")!, "persisted spend limit should drive percentage")
 }
 
+func testMissingPersistedKeyUsesEnvironmentFallbackForSpendService() async throws {
+    let fileURL = temporaryAPIKeyFileURL()
+    let primaryStore = LocalFileAPIKeyStore(fileURL: fileURL)
+    let store = EnvironmentFallbackAPIKeyStore(
+        primary: primaryStore,
+        environment: FakeEnvironmentProvider(values: ["LITELLM_API_KEY": "env-token"])
+    )
+    let service = SpendService(
+        apiKeyStore: store,
+        clientFactory: { _, apiKey in
+            try! expectEqual(apiKey, "env-token", "spend service should receive env fallback key")
+            return FakeClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+                rowsResult: .success([SpendLogSummaryRow(date: try! fixedDate("2026-05-18"), spendUSD: 10)])
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "expected refreshed result")
+    }
+    try expectEqual(snapshot.totalSpendUSD, 10, "environment fallback should allow spend refresh")
+    try expectEqual(try primaryStore.readAPIKey(), "env-token", "environment fallback should persist env key to the file store")
+}
+
+func testMissingPersistedKeyWithoutEnvironmentStillRequiresSetup() async throws {
+    let store = EnvironmentFallbackAPIKeyStore(
+        primary: LocalFileAPIKeyStore(fileURL: temporaryAPIKeyFileURL()),
+        environment: FakeEnvironmentProvider(values: [:])
+    )
+    let service = SpendService(
+        apiKeyStore: store,
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .failure(LiteLLMClientError.unavailable),
+                rowsResult: .success([])
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case .setupRequired = result else {
+        throw TestFailure(description: "missing persisted key without env should still require setup")
+    }
+}
+
 func snapshot(range: SpendRange = .today, total: Decimal = 8, isStale: Bool = false) throws -> SpendSnapshot {
     SpendSnapshot(
         range: range,
@@ -3106,6 +3155,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testMalformedResponseWithoutCacheReturnsFailed", testMalformedResponseWithoutCacheReturnsFailed),
     ("testUsesConfiguredSpendLimit", testUsesConfiguredSpendLimit),
     ("testSpendServiceUsesPersistedSpendLimit", testSpendServiceUsesPersistedSpendLimit),
+    ("testMissingPersistedKeyUsesEnvironmentFallbackForSpendService", testMissingPersistedKeyUsesEnvironmentFallbackForSpendService),
+    ("testMissingPersistedKeyWithoutEnvironmentStillRequiresSetup", testMissingPersistedKeyWithoutEnvironmentStillRequiresSetup),
     ("testInitialRefreshLoadsTodaySnapshot", testInitialRefreshLoadsTodaySnapshot),
     ("testChangingSpendLimitRefreshesPresentationWithoutNetwork", testChangingSpendLimitRefreshesPresentationWithoutNetwork),
     ("testInvalidSpendLimitShowsSettingsError", testInvalidSpendLimitShowsSettingsError),
