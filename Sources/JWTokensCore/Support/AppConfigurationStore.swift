@@ -58,9 +58,11 @@ public struct LocalAppConfigurationStore: MutableAppConfigurationStoring {
                 spendLimitUSD: stored.validSpendLimit ?? defaults.spendLimitUSD
             )
             if stored.needsNormalization(comparedTo: configuration) {
-                try? saveConfiguration(configuration)
+                try saveConfiguration(configuration)
             }
             return configuration
+        } catch let error as AppConfigurationStoreError {
+            throw error
         } catch {
             return defaults
         }
