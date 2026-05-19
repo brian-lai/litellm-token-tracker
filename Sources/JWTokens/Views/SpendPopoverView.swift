@@ -23,13 +23,22 @@ struct SpendPopoverView: View {
                     Text(presentation.totalText)
                         .font(.title2.weight(.semibold))
                         .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .allowsTightening(true)
                     Text("\(presentation.percentText) of \(presentation.limitText)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .allowsTightening(true)
                     if let overLimitText = presentation.overLimitText {
                         Text(overLimitText)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.red)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .allowsTightening(true)
                     }
                     Text(presentation.refreshedText)
                         .font(.caption2)
@@ -135,6 +144,9 @@ struct SpendPopoverView: View {
                     Text(row.value)
                         .font(.caption.monospacedDigit().weight(.medium))
                         .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .allowsTightening(true)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }

@@ -1,0 +1,22 @@
+name: fix-gauge-value-wrapping
+date: 2026-05-18
+scope:
+  - Prevent large currency and percent labels from wrapping in the spend popover.
+  - Preserve the existing popover dimensions and visual hierarchy.
+ui_contract:
+  gauge_value:
+    line_limit: 1
+    behavior: shrink to fit inside the gauge interior
+    minimum_scale_factor: 0.45
+  summary_values:
+    line_limit: 1
+    behavior: shrink slightly instead of wrapping
+  detail_values:
+    line_limit: 1
+    behavior: truncate only as a last resort after scale down
+tests:
+  - swift build
+  - swift run JWTokensTests
+manual_visual_check:
+  - YTD value such as $4,270.75 remains on one line inside the gauge.
+  - Today value remains visually large and unchanged for normal widths.
