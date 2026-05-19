@@ -1,0 +1,10 @@
+{
+  "key_alias": "Claude Code",
+  "key_name": "claude-code-key",
+  "spend": 65.5663,
+  "max_budget": 80,
+  "budget_reset_at": "2026-06-01T00:00:00Z",
+  "last_active": "2026-05-19T12:00:00Z",
+  "api_key": "sk-should-not-decode",
+  "token": "token-should-not-decode"
+}

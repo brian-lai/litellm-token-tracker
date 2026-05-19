@@ -345,6 +345,34 @@ public struct LiteLLMUserContext: Equatable, Sendable {
     }
 }
 
+public struct KeySpendSummary: Equatable, Sendable {
+    public let alias: String?
+    public let name: String?
+    public let spendUSD: Decimal
+    public let maxBudgetUSD: Decimal?
+    public let budgetResetAt: Date?
+    public let lastActiveAt: Date?
+
+    public init(alias: String?, name: String?, spendUSD: Decimal, maxBudgetUSD: Decimal?, budgetResetAt: Date?, lastActiveAt: Date?) {
+        self.alias = alias
+        self.name = name
+        self.spendUSD = spendUSD
+        self.maxBudgetUSD = maxBudgetUSD
+        self.budgetResetAt = budgetResetAt
+        self.lastActiveAt = lastActiveAt
+    }
+
+    public var displayName: String {
+        if let alias, !alias.isEmpty {
+            return alias
+        }
+        if let name, !name.isEmpty {
+            return name
+        }
+        return "Unnamed key"
+    }
+}
+
 public protocol SpendServicing: Sendable {
     func refresh(range: SpendRange, now: Date, calendar: Calendar) async -> SpendRefreshResult
 }

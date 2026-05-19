@@ -220,6 +220,35 @@ func testDecodesUserInfoSpendAndBudget() throws {
     try expect(context.budgetResetAt != nil, "budget reset date should decode")
 }
 
+func testDecodesCurrentKeyInfoSafeFieldsOnly() throws {
+    let summary = try LiteLLMResponseDecoder.decodeCurrentKey(from: fixtureData("key-info.json"))
+
+    try expectEqual(summary.alias, "Claude Code", "key alias should decode")
+    try expectEqual(summary.name, "claude-code-key", "key name should decode")
+    try expectEqual(summary.spendUSD, Decimal(string: "65.5663")!, "key spend should decode")
+    try expectEqual(summary.maxBudgetUSD, 80, "key budget should decode")
+    try expect(summary.budgetResetAt != nil, "budget reset should decode")
+    try expect(summary.lastActiveAt != nil, "last active should decode")
+}
+
+func testDecodesUserKeyListAliasesAndBudgets() throws {
+    let summaries = try LiteLLMResponseDecoder.decodeUserKeys(from: fixtureData("key-list.json"))
+
+    try expectEqual(summaries.count, 2, "key list should decode keys")
+    try expectEqual(summaries[0].displayName, "Claude Code", "alias should be preferred for display")
+    try expectEqual(summaries[0].maxBudgetUSD, 80, "key budget should decode")
+    try expectEqual(summaries[1].displayName, "fallback-name", "key name should be fallback display")
+}
+
+func testKeyDTOsDoNotExposeRawTokenFields() throws {
+    let summary = try LiteLLMResponseDecoder.decodeCurrentKey(from: fixtureData("key-info.json"))
+    let summaries = try LiteLLMResponseDecoder.decodeUserKeys(from: fixtureData("key-list.json"))
+    let rendered = String(describing: summary) + String(describing: summaries)
+
+    try expect(!rendered.contains("sk-should-not-decode"), "decoded key DTOs should not expose raw api_key")
+    try expect(!rendered.contains("token-should-not-decode"), "decoded key DTOs should not expose raw token")
+}
+
 func testDecodesSummarizedSpendRows() throws {
     let result = try LiteLLMResponseDecoder.decodeSpendRows(from: fixtureData("spend-logs-summary.json"))
 
@@ -1922,6 +1951,9 @@ func testChangingMetricUpdatesMenuBarPresentation() async throws {
 let syncTests: [(String, () throws -> Void)] = [
     ("testTestRunnerLoadsCoreTarget", testTestRunnerLoadsCoreTarget),
     ("testDecodesUserInfoSpendAndBudget", testDecodesUserInfoSpendAndBudget),
+    ("testDecodesCurrentKeyInfoSafeFieldsOnly", testDecodesCurrentKeyInfoSafeFieldsOnly),
+    ("testDecodesUserKeyListAliasesAndBudgets", testDecodesUserKeyListAliasesAndBudgets),
+    ("testKeyDTOsDoNotExposeRawTokenFields", testKeyDTOsDoNotExposeRawTokenFields),
     ("testDecodesSummarizedSpendRows", testDecodesSummarizedSpendRows),
     ("testDecodesMissingSpendAsZero", testDecodesMissingSpendAsZero),
     ("testSkipsRowsWithUnparseableDates", testSkipsRowsWithUnparseableDates),
