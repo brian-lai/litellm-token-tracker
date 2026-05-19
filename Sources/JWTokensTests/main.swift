@@ -330,6 +330,27 @@ func testKeyListStringEntriesAreIgnoredWithoutExposingTokens() throws {
     try expect(!rendered.contains("token-should-not-display"), "decoded key list should not expose raw token strings")
 }
 
+func testKeyListTokenOnlyObjectsAreIgnoredWithoutExposingTokens() throws {
+    let data = Data(#"{"keys":[{"api_key":"sk-should-not-display","token":"token-should-not-display"}]}"#.utf8)
+    let summaries = try LiteLLMResponseDecoder.decodeUserKeys(from: data)
+    let rendered = String(describing: summaries)
+
+    try expectEqual(summaries.count, 0, "token-only key objects should not be displayed as unnamed spend rows")
+    try expect(!rendered.contains("sk-should-not-display"), "token-only key object should not expose raw api_key")
+    try expect(!rendered.contains("token-should-not-display"), "token-only key object should not expose raw token")
+}
+
+func testCurrentKeyTokenOnlyObjectIsMalformed() throws {
+    let data = Data(#"{"api_key":"sk-should-not-display","token":"token-should-not-display"}"#.utf8)
+
+    do {
+        _ = try LiteLLMResponseDecoder.decodeCurrentKey(from: data)
+        throw TestFailure(description: "token-only current key object should be malformed")
+    } catch LiteLLMClientError.malformedResponse {
+        return
+    }
+}
+
 func testDecodesSummarizedSpendRows() throws {
     let result = try LiteLLMResponseDecoder.decodeSpendRows(from: fixtureData("spend-logs-summary.json"))
 
@@ -2293,6 +2314,38 @@ func testAPIKeyChangeClearsCachedUserContextForKeysMode() async throws {
     try expectEqual(keyService.requestedUserContexts.first!, nil, "Keys mode should not pass stale user context after API key changes")
 }
 
+@MainActor
+func testKeyAuthFailureClearsPreviousKeyContext() async throws {
+    let snapshot = KeyContextSnapshot(currentKey: keySummary(alias: "First", spend: 1), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
+    let keyService = RecordingKeyContextService(results: [
+        .refreshed(snapshot),
+        .authFailed(message: "LiteLLM key context was rejected")
+    ])
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), keyContextService: keyService)
+
+    await viewModel.selectPopoverMode(.keys, now: try fixedDate("2026-05-18"))
+    await viewModel.refreshSelectedMode(now: try fixedDate("2026-05-18").addingTimeInterval(60), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.keyContextSnapshot, nil, "key auth failures should clear previous key context")
+    try expectEqual(viewModel.keyContextErrorMessage, "LiteLLM key context was rejected", "key auth failure should remain visible")
+}
+
+@MainActor
+func testKeyHardFailureClearsPreviousKeyContext() async throws {
+    let snapshot = KeyContextSnapshot(currentKey: keySummary(alias: "First", spend: 1), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
+    let keyService = RecordingKeyContextService(results: [
+        .refreshed(snapshot),
+        .failed(message: "Unable to load key context")
+    ])
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), keyContextService: keyService)
+
+    await viewModel.selectPopoverMode(.keys, now: try fixedDate("2026-05-18"))
+    await viewModel.refreshSelectedMode(now: try fixedDate("2026-05-18").addingTimeInterval(60), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.keyContextSnapshot, nil, "hard key failures without stale data should clear previous key context")
+    try expectEqual(viewModel.keyContextErrorMessage, "Unable to load key context", "hard key failure should remain visible")
+}
+
 func testKeysModeShowsCurrentKeyAlias() throws {
     let snapshot = KeyContextSnapshot(currentKey: keySummary(alias: "Claude Code", spend: 65), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
     let presentation = KeyBudgetPresentation.make(snapshot: snapshot, errorMessage: nil, calendar: fixedCalendar())
@@ -2383,6 +2436,8 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testDecodesUserKeyListAliasesAndBudgets", testDecodesUserKeyListAliasesAndBudgets),
     ("testKeyDTOsDoNotExposeRawTokenFields", testKeyDTOsDoNotExposeRawTokenFields),
     ("testKeyListStringEntriesAreIgnoredWithoutExposingTokens", testKeyListStringEntriesAreIgnoredWithoutExposingTokens),
+    ("testKeyListTokenOnlyObjectsAreIgnoredWithoutExposingTokens", testKeyListTokenOnlyObjectsAreIgnoredWithoutExposingTokens),
+    ("testCurrentKeyTokenOnlyObjectIsMalformed", testCurrentKeyTokenOnlyObjectIsMalformed),
     ("testDecodesSummarizedSpendRows", testDecodesSummarizedSpendRows),
     ("testDecodesMissingSpendAsZero", testDecodesMissingSpendAsZero),
     ("testSkipsRowsWithUnparseableDates", testSkipsRowsWithUnparseableDates),
@@ -2529,7 +2584,9 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testReenteringKeysAfterFiveMinutesRequestsKeyRefresh", testReenteringKeysAfterFiveMinutesRequestsKeyRefresh),
     ("testManualRefreshInKeysRefreshesKeyContext", testManualRefreshInKeysRefreshesKeyContext),
     ("testAPIKeyChangeClearsVisibleKeyContext", testAPIKeyChangeClearsVisibleKeyContext),
-    ("testAPIKeyChangeClearsCachedUserContextForKeysMode", testAPIKeyChangeClearsCachedUserContextForKeysMode)
+    ("testAPIKeyChangeClearsCachedUserContextForKeysMode", testAPIKeyChangeClearsCachedUserContextForKeysMode),
+    ("testKeyAuthFailureClearsPreviousKeyContext", testKeyAuthFailureClearsPreviousKeyContext),
+    ("testKeyHardFailureClearsPreviousKeyContext", testKeyHardFailureClearsPreviousKeyContext)
 ]
 
 var failures: [String] = []

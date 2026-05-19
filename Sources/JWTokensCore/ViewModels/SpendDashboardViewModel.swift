@@ -123,6 +123,7 @@ public final class SpendDashboardViewModel {
             keyContextSnapshot = snapshot
             keyContextErrorMessage = message
         case let .authFailed(message), let .failed(message):
+            keyContextSnapshot = nil
             keyContextErrorMessage = message
         }
     }

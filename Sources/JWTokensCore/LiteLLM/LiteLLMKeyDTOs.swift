@@ -27,6 +27,17 @@ public struct LiteLLMKeyInfoResponse: Decodable, Equatable, Sendable {
             lastActiveAt: lastActive
         )
     }
+
+    public var hasDisplayableSafeFields: Bool {
+        keyAlias != nil || keyName != nil || spend != nil || maxBudget != nil
+    }
+
+    public func toDomainIfDisplayable() -> KeySpendSummary? {
+        guard hasDisplayableSafeFields else {
+            return nil
+        }
+        return toDomain()
+    }
 }
 
 public struct LiteLLMKeyListResponse: Decodable, Equatable, Sendable {
@@ -52,7 +63,7 @@ public enum LiteLLMKeyListEntry: Decodable, Equatable, Sendable {
     public var summary: KeySpendSummary? {
         switch self {
         case let .object(response):
-            return response.toDomain()
+            return response.toDomainIfDisplayable()
         case .redactedString:
             return nil
         }
@@ -62,7 +73,11 @@ public enum LiteLLMKeyListEntry: Decodable, Equatable, Sendable {
 public extension LiteLLMResponseDecoder {
     static func decodeCurrentKey(from data: Data) throws -> KeySpendSummary {
         do {
-            return try makeJSONDecoder().decode(LiteLLMKeyInfoResponse.self, from: data).toDomain()
+            let response = try makeJSONDecoder().decode(LiteLLMKeyInfoResponse.self, from: data)
+            guard let summary = response.toDomainIfDisplayable() else {
+                throw LiteLLMClientError.malformedResponse
+            }
+            return summary
         } catch {
             throw LiteLLMClientError.malformedResponse
         }
@@ -74,7 +89,7 @@ public extension LiteLLMResponseDecoder {
             if let wrapped = try? decoder.decode(LiteLLMKeyListResponse.self, from: data) {
                 return wrapped.keys.compactMap(\.summary)
             }
-            return try decoder.decode([LiteLLMKeyInfoResponse].self, from: data).map { $0.toDomain() }
+            return try decoder.decode([LiteLLMKeyInfoResponse].self, from: data).compactMap { $0.toDomainIfDisplayable() }
         } catch {
             throw LiteLLMClientError.malformedResponse
         }
