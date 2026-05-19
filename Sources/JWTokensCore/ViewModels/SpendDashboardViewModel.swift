@@ -131,6 +131,47 @@ public final class SpendDashboardViewModel {
         }
     }
 
+    public func saveBaseURL() {
+        let trimmedValue = baseURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let baseURL = URL(string: trimmedValue), baseURL.scheme?.hasPrefix("http") == true, baseURL.host != nil else {
+            settingsErrorMessage = "Base URL must be a valid HTTP URL"
+            return
+        }
+        guard let configurationStore else {
+            settingsErrorMessage = "Unable to save settings"
+            return
+        }
+
+        do {
+            let currentConfiguration = try configurationStore.loadConfiguration()
+            try configurationStore.saveConfiguration(AppConfiguration(baseURL: baseURL, spendLimitUSD: currentConfiguration.spendLimitUSD))
+            baseURLDraft = baseURL.absoluteString
+            settingsErrorMessage = nil
+            apiKeyDidChange()
+        } catch {
+            settingsErrorMessage = "Unable to save settings"
+        }
+    }
+
+    public func clearAPIKey() {
+        guard let apiKeyStore else {
+            errorMessage = "Unable to clear LiteLLM API key"
+            return
+        }
+        do {
+            try apiKeyStore.deleteAPIKey()
+            apiKeyDraft = ""
+            errorMessage = "LiteLLM API key is missing"
+            requiresSetup = true
+            pausesAutomaticRefresh = true
+            apiKeyDidChange()
+            requiresSetup = true
+            pausesAutomaticRefresh = true
+        } catch {
+            errorMessage = "Unable to clear LiteLLM API key"
+        }
+    }
+
     public func selectPopoverMode(_ mode: SpendPopoverMode, now: Date = Date()) async {
         selectedPopoverMode = mode
         if mode == .keys {

@@ -2155,8 +2155,8 @@ func testSelectingPopoverModeDoesNotRefreshSpend() async throws {
 }
 
 func testPopoverModesExposeOverviewTrendsBreakdown() throws {
-    try expectEqual(SpendPopoverMode.allCases, [.overview, .trends, .breakdown, .keys], "popover should expose analytics and key modes")
-    try expectEqual(SpendPopoverMode.allCases.map(\.displayName), ["Overview", "Trends", "Breakdown", "Keys"], "popover modes should have display names")
+    try expectEqual(SpendPopoverMode.allCases, [.overview, .trends, .breakdown, .keys, .settings], "popover should expose analytics, key, and settings modes")
+    try expectEqual(SpendPopoverMode.allCases.map(\.displayName), ["Overview", "Trends", "Breakdown", "Keys", "Settings"], "popover modes should have display names")
 }
 
 @MainActor
@@ -2464,6 +2464,58 @@ func testKeyHardFailureClearsPreviousKeyContext() async throws {
     try expectEqual(viewModel.keyContextErrorMessage, "Unable to load key context", "hard key failure should remain visible")
 }
 
+func testSettingsModeShowsCredentialSourceWithoutSecretPathByDefault() throws {
+    let presentation = SettingsPresentation.make(baseURLText: "https://litellm.justworksai.net", spendLimitText: "80", snapshot: nil, settingsError: nil)
+    let rows = Dictionary(uniqueKeysWithValues: presentation.diagnosticRows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Credential"], "Local file", "settings diagnostics should show credential source")
+    try expectEqual(rows["Credential path"], "Hidden by default", "settings diagnostics should not show credential path by default")
+}
+
+func testSettingsModeShowsDataSource() throws {
+    let snapshot = SpendSnapshot(
+        range: .today,
+        totalSpendUSD: 8,
+        limitUSD: 80,
+        percentOfLimit: Decimal(string: "0.1")!,
+        dailyPoints: [],
+        refreshedAt: try fixedDate("2026-05-18"),
+        isStale: false,
+        analytics: analyticsSummary(totalSpendUSD: 8, dailyPoints: [], source: .userDailyActivity)
+    )
+    let presentation = SettingsPresentation.make(baseURLText: "https://litellm.justworksai.net", spendLimitText: "80", snapshot: snapshot, settingsError: nil)
+    let rows = Dictionary(uniqueKeysWithValues: presentation.diagnosticRows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Source"], "Daily activity", "settings diagnostics should show current spend data source")
+}
+
+@MainActor
+func testSettingsModeCanClearAPIKey() async throws {
+    let store = MutableAPIKeyStore()
+    try store.saveAPIKey("secret-token")
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), apiKeyStore: store)
+
+    viewModel.clearAPIKey()
+
+    try expectEqual(store.savedKeys, [], "clear API key should delete stored credential")
+    try expect(viewModel.requiresSetup, "clearing API key should return app to setup state")
+    try expect(viewModel.pausesAutomaticRefresh, "clearing API key should pause automatic refresh")
+}
+
+func testSettingsModeShowsBaseURL() throws {
+    let presentation = SettingsPresentation.make(baseURLText: "https://litellm.justworksai.net", spendLimitText: "80", snapshot: nil, settingsError: nil)
+    let rows = Dictionary(uniqueKeysWithValues: presentation.diagnosticRows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Base URL"], "https://litellm.justworksai.net", "settings diagnostics should show configured base URL")
+}
+
+func testSettingsModeDocumentsLocalFileStoreRisk() throws {
+    let presentation = SettingsPresentation.make(baseURLText: "https://litellm.justworksai.net", spendLimitText: "80", snapshot: nil, settingsError: nil)
+
+    try expect(presentation.warningText.contains("local-development exception"), "settings diagnostics should document local file credential risk")
+    try expect(presentation.warningText.contains("Keychain"), "settings diagnostics should point company builds back to Keychain or managed storage")
+}
+
 func testKeysModeShowsCurrentKeyAlias() throws {
     let snapshot = KeyContextSnapshot(currentKey: keySummary(alias: "Claude Code", spend: 65), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
     let presentation = KeyBudgetPresentation.make(snapshot: snapshot, errorMessage: nil, calendar: fixedCalendar())
@@ -2624,6 +2676,10 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testKeysModeRowsHaveStableIDsForDuplicateNames", testKeysModeRowsHaveStableIDsForDuplicateNames),
     ("testKeysModeShowsBudgetResetContext", testKeysModeShowsBudgetResetContext),
     ("testKeysModeShowsScopedError", testKeysModeShowsScopedError),
+    ("testSettingsModeShowsCredentialSourceWithoutSecretPathByDefault", testSettingsModeShowsCredentialSourceWithoutSecretPathByDefault),
+    ("testSettingsModeShowsDataSource", testSettingsModeShowsDataSource),
+    ("testSettingsModeShowsBaseURL", testSettingsModeShowsBaseURL),
+    ("testSettingsModeDocumentsLocalFileStoreRisk", testSettingsModeDocumentsLocalFileStoreRisk),
     ("testSpendStatusBandThresholds", testSpendStatusBandThresholds),
     ("testRingProgressClampsOverLimitSpend", testRingProgressClampsOverLimitSpend),
     ("testRingPresentationFormatsDollarMetric", testRingPresentationFormatsDollarMetric),
@@ -2711,7 +2767,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testAPIKeyChangeClearsVisibleKeyContext", testAPIKeyChangeClearsVisibleKeyContext),
     ("testAPIKeyChangeClearsCachedUserContextForKeysMode", testAPIKeyChangeClearsCachedUserContextForKeysMode),
     ("testKeyAuthFailureClearsPreviousKeyContext", testKeyAuthFailureClearsPreviousKeyContext),
-    ("testKeyHardFailureClearsPreviousKeyContext", testKeyHardFailureClearsPreviousKeyContext)
+    ("testKeyHardFailureClearsPreviousKeyContext", testKeyHardFailureClearsPreviousKeyContext),
+    ("testSettingsModeCanClearAPIKey", testSettingsModeCanClearAPIKey)
 ]
 
 var failures: [String] = []

@@ -5,6 +5,7 @@ public enum SpendPopoverMode: String, CaseIterable, Identifiable, Sendable {
     case trends
     case breakdown
     case keys
+    case settings
 
     public var id: String { rawValue }
 
@@ -18,6 +19,8 @@ public enum SpendPopoverMode: String, CaseIterable, Identifiable, Sendable {
             return "Breakdown"
         case .keys:
             return "Keys"
+        case .settings:
+            return "Settings"
         }
     }
 }
