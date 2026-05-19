@@ -261,7 +261,7 @@ func testDecodesUserDailyActivitySummary() throws {
 
     try expectEqual(result.summary.totalSpendUSD, Decimal(string: "65.5663")!, "activity metadata total should decode")
     try expectEqual(result.summary.dailyPoints.count, 2, "valid activity rows should decode into daily points")
-    try expectEqual(result.summary.dailyPoints[0].spendUSD, Decimal(string: "17.067627950000004")!, "activity spend should decode")
+    try expectEqual(result.summary.dailyPoints[0].spendUSD, Decimal(string: "48.498672049999996")!, "activity spend should decode oldest-first")
     try expectEqual(result.skippedRowCount, 1, "unparseable dates should be skipped")
 }
 
@@ -357,6 +357,25 @@ func testSkipsMalformedBreakdownItems() throws {
     let labels = Set((result.analytics.breakdowns[.models] ?? []).map(\.label))
 
     try expect(!labels.contains("bad_model"), "malformed breakdown values should be skipped")
+}
+
+func testMalformedBreakdownObjectDoesNotDropActivityTotals() throws {
+    let data = Data(#"{"metadata":{"total_spend":7,"total_tokens":100},"results":[{"date":"2026-05-18","metrics":{"spend":7,"total_tokens":100},"breakdown":"not-an-object"}]}"#.utf8)
+    let result = try LiteLLMResponseDecoder.decodeUserDailyActivity(from: data, calendar: fixedCalendar())
+
+    try expectEqual(result.analytics.totalSpendUSD, 7, "malformed breakdown object should not drop total spend")
+    try expectEqual(result.analytics.totals.totalTokens, 100, "malformed breakdown object should not drop usage totals")
+    try expectEqual(result.analytics.dailyPoints.count, 1, "malformed breakdown object should not drop daily points")
+    try expectEqual(result.analytics.breakdowns, [:], "malformed breakdown object should produce empty breakdowns")
+}
+
+func testUserDailyActivityAnalyticsPointsAreSortedOldestFirst() throws {
+    let result = try LiteLLMResponseDecoder.decodeUserDailyActivity(
+        from: fixtureData("user-daily-activity.json"),
+        calendar: fixedCalendar()
+    )
+
+    try expectEqual(result.analytics.dailyPoints.map(\.date), result.analytics.dailyPoints.map(\.date).sorted(), "analytics daily points should be normalized oldest first")
 }
 
 func fixedCalendar() -> Calendar {
@@ -1680,6 +1699,8 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testDecodesUserDailyActivityUsageTotals", testDecodesUserDailyActivityUsageTotals),
     ("testDecodesUserDailyActivityModelBreakdown", testDecodesUserDailyActivityModelBreakdown),
     ("testSkipsMalformedBreakdownItems", testSkipsMalformedBreakdownItems),
+    ("testMalformedBreakdownObjectDoesNotDropActivityTotals", testMalformedBreakdownObjectDoesNotDropActivityTotals),
+    ("testUserDailyActivityAnalyticsPointsAreSortedOldestFirst", testUserDailyActivityAnalyticsPointsAreSortedOldestFirst),
     ("testDecodesSummarizedSpendRowsInRequestedTimezone", testDecodesSummarizedSpendRowsInRequestedTimezone),
     ("testTodayUsesTomorrowAsExclusiveEnd", testTodayUsesTomorrowAsExclusiveEnd),
     ("testLast7DaysIncludesTodayAndSixPriorDays", testLast7DaysIncludesTodayAndSixPriorDays),

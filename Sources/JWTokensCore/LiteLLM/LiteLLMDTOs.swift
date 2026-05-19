@@ -127,6 +127,19 @@ public struct LiteLLMUserDailyActivityResponse: Decodable, Equatable, Sendable {
         public let date: String?
         public let metrics: Metrics?
         public let breakdown: LiteLLMActivityBreakdown?
+
+        enum CodingKeys: String, CodingKey {
+            case date
+            case metrics
+            case breakdown
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            date = try container.decodeIfPresent(String.self, forKey: .date)
+            metrics = try container.decodeIfPresent(Metrics.self, forKey: .metrics)
+            breakdown = try? container.decodeIfPresent(LiteLLMActivityBreakdown.self, forKey: .breakdown)
+        }
     }
 
     public let metadata: Metadata?
@@ -279,10 +292,11 @@ public enum LiteLLMResponseDecoder {
         }
 
         let fallbackTotal = points.reduce(Decimal(0)) { $0 + $1.spendUSD }
+        let sortedPoints = points.sorted { $0.date < $1.date }
         let analytics = SpendAnalyticsSummary(
             totalSpendUSD: decoded.metadata?.totalSpend ?? fallbackTotal,
             totals: decoded.metadata?.totals ?? .zero,
-            dailyPoints: points,
+            dailyPoints: sortedPoints,
             breakdowns: breakdowns.mapValues { values in
                 values
                     .map { $0.value.item(label: $0.key) }
