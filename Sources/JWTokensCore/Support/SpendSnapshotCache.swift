@@ -3,6 +3,7 @@ import Foundation
 public protocol SpendSnapshotCaching: Sendable {
     func loadSnapshot(for range: SpendRange) throws -> SpendSnapshot?
     func saveSnapshot(_ snapshot: SpendSnapshot) throws
+    func clearSnapshots()
 }
 
 public final class InMemorySpendSnapshotCache: SpendSnapshotCaching, @unchecked Sendable {
@@ -21,5 +22,11 @@ public final class InMemorySpendSnapshotCache: SpendSnapshotCaching, @unchecked 
         lock.lock()
         defer { lock.unlock() }
         snapshots[snapshot.range] = snapshot
+    }
+
+    public func clearSnapshots() {
+        lock.lock()
+        defer { lock.unlock() }
+        snapshots.removeAll()
     }
 }

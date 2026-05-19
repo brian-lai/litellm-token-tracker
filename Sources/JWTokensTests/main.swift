@@ -1314,6 +1314,32 @@ func testClearingAPIKeyClearsSpendSnapshots() async throws {
     try expectEqual(viewModel.currentAnalyticsSummary, nil, "clearing API key should clear analytics from the old credential")
 }
 
+@MainActor
+func testAPIKeyChangeClearsSpendServiceFallbackCache() async throws {
+    let store = MutableAPIKeyStore()
+    try store.saveAPIKey("first-key")
+    let firstClient = FakeClient(
+        userResult: .success(LiteLLMUserContext(userID: "first-user", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        rowsResult: .success([SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: 12)])
+    )
+    let secondClient = FakeClient(
+        userResult: .failure(LiteLLMClientError.unavailable),
+        rowsResult: .success([])
+    )
+    let spendService = SpendService(apiKeyStore: store, clientFactory: { _, apiKey in
+        apiKey == "first-key" ? firstClient : secondClient
+    })
+    let viewModel = SpendDashboardViewModel(spendService: spendService)
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    try store.saveAPIKey("second-key")
+    viewModel.apiKeyDidChange()
+    await viewModel.refresh(now: try fixedDate("2026-05-18").addingTimeInterval(60), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.currentSnapshot, nil, "API key changes should clear spend service fallback cache")
+    try expectEqual(viewModel.errorMessage, "Unable to refresh spend", "new credential transient failure should not show old credential stale spend")
+}
+
 func analyticsSummary(totalSpendUSD: Decimal, dailyPoints: [DailySpendPoint], source: SpendDataSource = .userDailyActivity) -> SpendAnalyticsSummary {
     SpendAnalyticsSummary(
         totalSpendUSD: totalSpendUSD,
@@ -2919,6 +2945,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testChangingBaseURLPreservesSetupPauseState", testChangingBaseURLPreservesSetupPauseState),
     ("testAPIKeyChangeClearsSpendSnapshots", testAPIKeyChangeClearsSpendSnapshots),
     ("testClearingAPIKeyClearsSpendSnapshots", testClearingAPIKeyClearsSpendSnapshots),
+    ("testAPIKeyChangeClearsSpendServiceFallbackCache", testAPIKeyChangeClearsSpendServiceFallbackCache),
     ("testSelectingRangeFetchesThatRange", testSelectingRangeFetchesThatRange),
     ("testTransientFailureKeepsStaleSnapshot", testTransientFailureKeepsStaleSnapshot),
     ("testViewModelStoresCurrentAnalyticsSummary", testViewModelStoresCurrentAnalyticsSummary),

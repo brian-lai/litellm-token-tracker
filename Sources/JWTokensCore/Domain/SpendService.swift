@@ -81,4 +81,8 @@ public struct SpendService: SpendServicing {
             return .failed(message: "Unable to refresh spend")
         }
     }
+
+    public func clearCache() {
+        cache.clearSnapshots()
+    }
 }

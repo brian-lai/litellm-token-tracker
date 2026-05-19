@@ -389,6 +389,11 @@ public struct KeySpendSummary: Equatable, Sendable {
 
 public protocol SpendServicing: Sendable {
     func refresh(range: SpendRange, now: Date, calendar: Calendar) async -> SpendRefreshResult
+    func clearCache()
+}
+
+public extension SpendServicing {
+    func clearCache() {}
 }
 
 public protocol DateRangeResolving: Sendable {

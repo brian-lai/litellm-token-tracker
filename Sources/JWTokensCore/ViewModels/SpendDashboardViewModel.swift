@@ -281,6 +281,7 @@ public final class SpendDashboardViewModel {
 
     private func clearEndpointScopedState() {
         clearSpendSnapshots()
+        spendService.clearCache()
         keyContextSnapshot = nil
         keyContextErrorMessage = nil
         userContext = nil
