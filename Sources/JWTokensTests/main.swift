@@ -1134,6 +1134,29 @@ func testUsesConfiguredSpendLimit() async throws {
     try expectEqual(snapshot.percentOfLimit, Decimal(string: "0.25")!, "service should compute percent from configured limit")
 }
 
+func testSpendServiceUsesPersistedSpendLimit() async throws {
+    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    try configurationStore.saveConfiguration(AppConfiguration(spendLimitUSD: 40))
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: configurationStore,
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+                rowsResult: .success([SpendLogSummaryRow(date: try! fixedDate("2026-05-18"), spendUSD: 10)])
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "expected refreshed result")
+    }
+    try expectEqual(snapshot.limitUSD, 40, "spend service should use persisted spend limit")
+    try expectEqual(snapshot.percentOfLimit, Decimal(string: "0.25")!, "persisted spend limit should drive percentage")
+}
+
 func snapshot(range: SpendRange = .today, total: Decimal = 8, isStale: Bool = false) throws -> SpendSnapshot {
     SpendSnapshot(
         range: range,
@@ -1144,6 +1167,37 @@ func snapshot(range: SpendRange = .today, total: Decimal = 8, isStale: Bool = fa
         refreshedAt: try fixedDate("2026-05-18"),
         isStale: isStale
     )
+}
+
+@MainActor
+func testChangingSpendLimitRefreshesPresentationWithoutNetwork() async throws {
+    let service = RecordingSpendService(results: [])
+    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    try configurationStore.saveConfiguration(AppConfiguration(spendLimitUSD: 80))
+    let viewModel = SpendDashboardViewModel(spendService: service, configurationStore: configurationStore)
+    viewModel.currentSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.menuBarSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.spendLimitDraft = "100"
+
+    viewModel.saveSpendLimit()
+
+    try expectEqual(service.requestedRanges, [], "changing spend limit should not perform a network refresh")
+    try expectEqual(viewModel.currentSnapshot?.limitUSD, 100, "current presentation should use the new spend limit")
+    try expectEqual(viewModel.currentSnapshot?.percentOfLimit, Decimal(string: "0.4")!, "current percentage should be recomputed")
+    try expectEqual(viewModel.menuBarSnapshot?.percentOfLimit, Decimal(string: "0.4")!, "menu bar percentage should be recomputed")
+}
+
+@MainActor
+func testInvalidSpendLimitShowsSettingsError() async throws {
+    let service = RecordingSpendService(results: [])
+    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    let viewModel = SpendDashboardViewModel(spendService: service, configurationStore: configurationStore)
+    viewModel.spendLimitDraft = "-1"
+
+    viewModel.saveSpendLimit()
+
+    try expectEqual(service.requestedRanges, [], "invalid spend limit should not refresh spend")
+    try expectEqual(viewModel.settingsErrorMessage, "Spend limit must be a positive dollar amount", "invalid spend limit should show a scoped settings error")
 }
 
 func analyticsSummary(totalSpendUSD: Decimal, dailyPoints: [DailySpendPoint], source: SpendDataSource = .userDailyActivity) -> SpendAnalyticsSummary {
@@ -2618,7 +2672,10 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testMissingKeyReturnsSetupRequired", testMissingKeyReturnsSetupRequired),
     ("testMalformedResponseWithoutCacheReturnsFailed", testMalformedResponseWithoutCacheReturnsFailed),
     ("testUsesConfiguredSpendLimit", testUsesConfiguredSpendLimit),
+    ("testSpendServiceUsesPersistedSpendLimit", testSpendServiceUsesPersistedSpendLimit),
     ("testInitialRefreshLoadsTodaySnapshot", testInitialRefreshLoadsTodaySnapshot),
+    ("testChangingSpendLimitRefreshesPresentationWithoutNetwork", testChangingSpendLimitRefreshesPresentationWithoutNetwork),
+    ("testInvalidSpendLimitShowsSettingsError", testInvalidSpendLimitShowsSettingsError),
     ("testSelectingRangeFetchesThatRange", testSelectingRangeFetchesThatRange),
     ("testTransientFailureKeepsStaleSnapshot", testTransientFailureKeepsStaleSnapshot),
     ("testViewModelStoresCurrentAnalyticsSummary", testViewModelStoresCurrentAnalyticsSummary),

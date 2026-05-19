@@ -8,6 +8,7 @@ public final class SpendDashboardViewModel {
     private let keyContextService: KeyContextServicing?
     private let apiKeyStore: APIKeyStoring?
     private let menuBarPreferenceStore: MenuBarPreferenceStoring?
+    private let configurationStore: MutableAppConfigurationStoring?
 
     public var selectedRange: SpendRange = .today
     public var currentSnapshot: SpendSnapshot?
@@ -23,6 +24,9 @@ public final class SpendDashboardViewModel {
     public var requiresSetup = false
     public var pausesAutomaticRefresh = false
     public var apiKeyDraft = ""
+    public var spendLimitDraft = ""
+    public var baseURLDraft = ""
+    public var settingsErrorMessage: String?
     public var menuBarMetric: MenuBarMetric
 
     public var menuBarTitle: String {
@@ -41,13 +45,18 @@ public final class SpendDashboardViewModel {
         spendService: SpendServicing,
         keyContextService: KeyContextServicing? = nil,
         apiKeyStore: APIKeyStoring? = nil,
-        menuBarPreferenceStore: MenuBarPreferenceStoring? = nil
+        menuBarPreferenceStore: MenuBarPreferenceStoring? = nil,
+        configurationStore: MutableAppConfigurationStoring? = nil
     ) {
         self.spendService = spendService
         self.keyContextService = keyContextService
         self.apiKeyStore = apiKeyStore
         self.menuBarPreferenceStore = menuBarPreferenceStore
+        self.configurationStore = configurationStore
         self.menuBarMetric = (try? menuBarPreferenceStore?.loadMetric()) ?? .dollars
+        let configuration = (try? configurationStore?.loadConfiguration()) ?? AppConfiguration()
+        self.spendLimitDraft = NSDecimalNumber(decimal: configuration.spendLimitUSD).stringValue
+        self.baseURLDraft = configuration.baseURL.absoluteString
     }
 
     public func refresh(now: Date = Date(), calendar: Calendar = .current, isAutomatic: Bool = false) async {
@@ -97,6 +106,28 @@ public final class SpendDashboardViewModel {
             try menuBarPreferenceStore?.saveMetric(metric)
         } catch {
             errorMessage = "Unable to save menu bar preference"
+        }
+    }
+
+    public func saveSpendLimit() {
+        let trimmedValue = spendLimitDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let spendLimit = Decimal(string: trimmedValue), spendLimit > 0 else {
+            settingsErrorMessage = "Spend limit must be a positive dollar amount"
+            return
+        }
+        guard let configurationStore else {
+            settingsErrorMessage = "Unable to save settings"
+            return
+        }
+
+        do {
+            let currentConfiguration = try configurationStore.loadConfiguration()
+            try configurationStore.saveConfiguration(AppConfiguration(baseURL: currentConfiguration.baseURL, spendLimitUSD: spendLimit))
+            applySpendLimit(spendLimit)
+            spendLimitDraft = NSDecimalNumber(decimal: spendLimit).stringValue
+            settingsErrorMessage = nil
+        } catch {
+            settingsErrorMessage = "Unable to save settings"
         }
     }
 
@@ -192,6 +223,15 @@ public final class SpendDashboardViewModel {
         case let .failed(message):
             errorMessage = message
             requiresSetup = false
+        }
+    }
+
+    private func applySpendLimit(_ spendLimit: Decimal) {
+        if let currentSnapshot {
+            self.currentSnapshot = currentSnapshot.applyingLimit(spendLimit)
+        }
+        if let menuBarSnapshot {
+            self.menuBarSnapshot = menuBarSnapshot.applyingLimit(spendLimit)
         }
     }
 }
