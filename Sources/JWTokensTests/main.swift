@@ -1390,6 +1390,19 @@ func testTrendPresentationScalesLongRanges() throws {
     try expect(presentation.accessibilityLabel.contains("30 days"), "trend accessibility should include range density")
 }
 
+func testTrendPresentationBucketsYearToDateScaleInput() throws {
+    let points = try (0..<180).map { index in
+        DailyActivityPoint(date: try fixedDate("2026-01-01").addingTimeInterval(TimeInterval(index * 86400)), spendUSD: Decimal(index + 1), totals: .zero)
+    }
+    let analytics = SpendAnalyticsSummary(totalSpendUSD: 16290, totals: .zero, dailyPoints: points, breakdowns: [:], source: .userDailyActivity)
+
+    let presentation = TrendPresentation.make(analytics: analytics, calendar: fixedCalendar())
+
+    try expectEqual(presentation.days.count, TrendPresentation.maximumRenderedDays, "trend presentation should bucket YTD-scale data to fit the popover")
+    try expectEqual(presentation.days.last?.heightRatio, 1, "largest bucket should scale to full height")
+    try expect(presentation.accessibilityLabel.contains("180 days"), "trend accessibility should preserve original day count")
+}
+
 func testTrendPresentationHandlesEmptyActivity() throws {
     let analytics = SpendAnalyticsSummary(totalSpendUSD: 0, totals: .zero, dailyPoints: [], breakdowns: [:], source: .userDailyActivity)
     let presentation = TrendPresentation.make(analytics: analytics, calendar: fixedCalendar())
@@ -1442,6 +1455,36 @@ func testModelBreakdownShowsEmptyStateWhenUnavailable() throws {
 
     try expect(presentation.isEmpty, "missing model breakdown should show empty state")
     try expectEqual(presentation.emptyText, "No model breakdown available", "empty breakdown should be clear")
+}
+
+func testModelBreakdownCapsDenseListsWithOther() throws {
+    let items = (0..<12).map { index in
+        SpendBreakdownItem(label: "model-\(index)", spendUSD: Decimal(12 - index), tokens: nil, requests: nil)
+    }
+    let analytics = SpendAnalyticsSummary(totalSpendUSD: 78, totals: .zero, dailyPoints: [], breakdowns: [.models: items], source: .userDailyActivity)
+
+    let presentation = BreakdownPresentation.make(analytics: analytics)
+
+    try expectEqual(presentation.rows.count, BreakdownPresentation.maximumRows, "dense model lists should be capped")
+    try expectEqual(presentation.rows.last?.label, "Other", "overflow model spend should aggregate into Other")
+}
+
+func testModelBreakdownZeroTotalRowsHaveZeroShare() throws {
+    let analytics = SpendAnalyticsSummary(
+        totalSpendUSD: 0,
+        totals: .zero,
+        dailyPoints: [],
+        breakdowns: [.models: [
+            SpendBreakdownItem(label: "zero-a", spendUSD: 0, tokens: nil, requests: nil),
+            SpendBreakdownItem(label: "zero-b", spendUSD: 0, tokens: nil, requests: nil)
+        ]],
+        source: .userDailyActivity
+    )
+
+    let presentation = BreakdownPresentation.make(analytics: analytics)
+
+    try expectEqual(presentation.rows.map(\.percentText), ["0%", "0%"], "zero-total breakdown rows should show zero percent")
+    try expectEqual(presentation.rows.map(\.share), [0, 0], "zero-total breakdown rows should have zero-width shares")
 }
 
 func testPreviewFixtureIncludesAdvancedAnalytics() throws {
@@ -1929,10 +1972,13 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testDailyChartPresentationScalesThirtyPoints", testDailyChartPresentationScalesThirtyPoints),
     ("testTrendPresentationIncludesDailySpendAndTokens", testTrendPresentationIncludesDailySpendAndTokens),
     ("testTrendPresentationScalesLongRanges", testTrendPresentationScalesLongRanges),
+    ("testTrendPresentationBucketsYearToDateScaleInput", testTrendPresentationBucketsYearToDateScaleInput),
     ("testTrendPresentationHandlesEmptyActivity", testTrendPresentationHandlesEmptyActivity),
     ("testModelBreakdownSortsBySpendDescending", testModelBreakdownSortsBySpendDescending),
     ("testModelBreakdownComputesPercentOfTotal", testModelBreakdownComputesPercentOfTotal),
     ("testModelBreakdownShowsEmptyStateWhenUnavailable", testModelBreakdownShowsEmptyStateWhenUnavailable),
+    ("testModelBreakdownCapsDenseListsWithOther", testModelBreakdownCapsDenseListsWithOther),
+    ("testModelBreakdownZeroTotalRowsHaveZeroShare", testModelBreakdownZeroTotalRowsHaveZeroShare),
     ("testPreviewFixtureIncludesAdvancedAnalytics", testPreviewFixtureIncludesAdvancedAnalytics),
     ("testPreviewFixtureIncludesLongModelNames", testPreviewFixtureIncludesLongModelNames),
     ("testPreviewFixtureIncludesEmptyBreakdownAndFallbackSource", testPreviewFixtureIncludesEmptyBreakdownAndFallbackSource),

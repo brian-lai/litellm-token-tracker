@@ -1,6 +1,8 @@
 import Foundation
 
 public struct BreakdownPresentation: Equatable, Sendable {
+    public static let maximumRows = 8
+
     public struct Row: Equatable, Identifiable, Sendable {
         public let label: String
         public let spendText: String
@@ -30,7 +32,7 @@ public struct BreakdownPresentation: Equatable, Sendable {
             )
         }
 
-        let sortedItems = items.sorted { $0.spendUSD > $1.spendUSD }
+        let sortedItems = cappedItems(items.sorted { $0.spendUSD > $1.spendUSD })
         let total = sortedItems.reduce(Decimal(0)) { $0 + $1.spendUSD }
         let rows = sortedItems.map { item in
             let shareDecimal = total == 0 ? Decimal(0) : item.spendUSD / total
@@ -58,5 +60,25 @@ public struct BreakdownPresentation: Equatable, Sendable {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    private static func cappedItems(_ items: [SpendBreakdownItem]) -> [SpendBreakdownItem] {
+        guard items.count > maximumRows else {
+            return items
+        }
+
+        let visibleCount = maximumRows - 1
+        let visible = Array(items.prefix(visibleCount))
+        let overflow = items.dropFirst(visibleCount)
+        let otherSpend = overflow.reduce(Decimal(0)) { $0 + $1.spendUSD }
+        let tokenValues = overflow.compactMap(\.tokens)
+        let requestValues = overflow.compactMap(\.requests)
+        let other = SpendBreakdownItem(
+            label: "Other",
+            spendUSD: otherSpend,
+            tokens: tokenValues.isEmpty ? nil : tokenValues.reduce(0, +),
+            requests: requestValues.isEmpty ? nil : requestValues.reduce(0, +)
+        )
+        return visible + [other]
     }
 }

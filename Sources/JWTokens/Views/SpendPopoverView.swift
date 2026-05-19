@@ -59,9 +59,9 @@ struct SpendPopoverView: View {
                     DailySpendChartView(presentation: .make(points: snapshot.dailyPoints))
                 }
             case .trends:
-                TrendView(presentation: .make(analytics: viewModel.currentAnalyticsSummary))
+                TrendView(presentation: .make(analytics: viewModel.currentSnapshot?.analytics))
             case .breakdown:
-                BreakdownView(presentation: .make(analytics: viewModel.currentAnalyticsSummary))
+                BreakdownView(presentation: .make(analytics: viewModel.currentSnapshot?.analytics))
             }
             Button {
                 Task {

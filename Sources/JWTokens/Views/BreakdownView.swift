@@ -37,7 +37,7 @@ struct BreakdownView: View {
                                         Capsule().fill(Color.white.opacity(0.10))
                                         Capsule()
                                             .fill(Color.cyan.opacity(0.85))
-                                            .frame(width: max(2, geometry.size.width * row.share))
+                                            .frame(width: row.share <= 0 ? 0 : max(2, geometry.size.width * row.share))
                                     }
                                 }
                                 .frame(height: 5)

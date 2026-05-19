@@ -1,6 +1,8 @@
 import Foundation
 
 public struct TrendPresentation: Equatable, Sendable {
+    public static let maximumRenderedDays = 45
+
     public struct Day: Equatable, Identifiable, Sendable {
         public let date: Date
         public let dateText: String
@@ -31,14 +33,15 @@ public struct TrendPresentation: Equatable, Sendable {
             )
         }
 
-        let maxSpend = analytics.dailyPoints.map(\.spendUSD).max() ?? 0
+        let sourcePoints = bucketedPoints(analytics.dailyPoints)
+        let maxSpend = sourcePoints.map(\.spendUSD).max() ?? 0
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.locale = Locale(identifier: "en_US")
         formatter.timeZone = calendar.timeZone
-        formatter.dateFormat = analytics.dailyPoints.count > 14 ? "M/d" : "EEE M/d"
+        formatter.dateFormat = sourcePoints.count > 14 ? "M/d" : "EEE M/d"
 
-        let days = analytics.dailyPoints.map { point in
+        let days = sourcePoints.map { point in
             Day(
                 date: point.date,
                 dateText: formatter.string(from: point.date),
@@ -55,13 +58,44 @@ public struct TrendPresentation: Equatable, Sendable {
             requestSummary: "\(integerText(analytics.totals.apiRequests)) requests",
             days: days,
             isEmpty: false,
-            accessibilityLabel: "Spend trend, \(days.count) days, total \(MenuBarTitleFormatter.currency(analytics.totalSpendUSD))"
+            accessibilityLabel: "Spend trend, \(analytics.dailyPoints.count) days, total \(MenuBarTitleFormatter.currency(analytics.totalSpendUSD))"
         )
+    }
+
+    private static func bucketedPoints(_ points: [DailyActivityPoint]) -> [DailyActivityPoint] {
+        guard points.count > maximumRenderedDays else {
+            return points
+        }
+
+        let bucketSize = Int(ceil(Double(points.count) / Double(maximumRenderedDays)))
+        return stride(from: 0, to: points.count, by: bucketSize).map { start in
+            let bucket = Array(points[start..<min(start + bucketSize, points.count)])
+            let totalSpend = bucket.reduce(Decimal(0)) { $0 + $1.spendUSD }
+            let totals = bucket.reduce(SpendUsageTotals.zero) { partial, point in
+                partial.adding(point.totals)
+            }
+            return DailyActivityPoint(date: bucket.first?.date ?? points[start].date, spendUSD: totalSpend, totals: totals)
+        }
     }
 
     private static func integerText(_ value: Int) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+}
+
+private extension SpendUsageTotals {
+    func adding(_ other: SpendUsageTotals) -> SpendUsageTotals {
+        SpendUsageTotals(
+            totalTokens: totalTokens + other.totalTokens,
+            promptTokens: promptTokens + other.promptTokens,
+            completionTokens: completionTokens + other.completionTokens,
+            cacheCreationTokens: cacheCreationTokens + other.cacheCreationTokens,
+            cacheReadTokens: cacheReadTokens + other.cacheReadTokens,
+            apiRequests: apiRequests + other.apiRequests,
+            successfulRequests: successfulRequests + other.successfulRequests,
+            failedRequests: failedRequests + other.failedRequests
+        )
     }
 }
