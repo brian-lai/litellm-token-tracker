@@ -66,11 +66,22 @@ struct FakeAPIKeyStore: APIKeyStoring {
     func deleteAPIKey() throws {}
 }
 
+struct FakeEnvironmentProvider: EnvironmentValueProviding {
+    let values: [String: String]
+
+    func value(for key: String) -> String? {
+        values[key]
+    }
+}
+
 final class MutableAPIKeyStore: APIKeyStoring, @unchecked Sendable {
     var savedKeys: [String] = []
 
     func readAPIKey() throws -> String {
-        savedKeys.last ?? ""
+        guard let key = savedKeys.last, !key.isEmpty else {
+            throw APIKeyStoreError.missingKey
+        }
+        return key
     }
 
     func saveAPIKey(_ apiKey: String) throws {
@@ -855,6 +866,52 @@ func testLocalFileAPIKeyStoreUsesPrivatePermissions() throws {
     try expectEqual(filePermissions, 0o600, "credential file should be private")
 }
 
+func testEnvironmentFallbackUsesPersistedKeyFirst() throws {
+    let store = EnvironmentFallbackAPIKeyStore(
+        primary: MutableAPIKeyStore(),
+        environment: FakeEnvironmentProvider(values: ["LITELLM_API_KEY": "env-token"])
+    )
+    try store.saveAPIKey("persisted-token")
+
+    try expectEqual(try store.readAPIKey(), "persisted-token", "environment fallback should prefer persisted key")
+}
+
+func testEnvironmentFallbackPersistsEnvKeyWhenPrimaryMissing() throws {
+    let primary = MutableAPIKeyStore()
+    let store = EnvironmentFallbackAPIKeyStore(
+        primary: primary,
+        environment: FakeEnvironmentProvider(values: ["LITELLM_API_KEY": "env-token"])
+    )
+
+    try expectEqual(try store.readAPIKey(), "env-token", "environment fallback should return env key when primary is missing")
+    try expectEqual(primary.savedKeys, ["env-token"], "environment fallback should persist env key into primary store")
+}
+
+func testEnvironmentFallbackMissingEnvStaysMissing() throws {
+    let store = EnvironmentFallbackAPIKeyStore(
+        primary: MutableAPIKeyStore(),
+        environment: FakeEnvironmentProvider(values: [:])
+    )
+
+    do {
+        _ = try store.readAPIKey()
+        throw TestFailure(description: "missing primary and missing env should still be missing")
+    } catch APIKeyStoreError.missingKey {
+        return
+    }
+}
+
+func testEnvironmentFallbackTrimsEnvValue() throws {
+    let primary = MutableAPIKeyStore()
+    let store = EnvironmentFallbackAPIKeyStore(
+        primary: primary,
+        environment: FakeEnvironmentProvider(values: ["LITELLM_API_KEY": "  env-token \n"])
+    )
+
+    try expectEqual(try store.readAPIKey(), "env-token", "environment fallback should trim env values before returning them")
+    try expectEqual(primary.savedKeys, ["env-token"], "environment fallback should persist trimmed env values")
+}
+
 func temporaryAPIKeyFileURL() -> URL {
     FileManager.default.temporaryDirectory
         .appendingPathComponent("jw_tokens_tests", isDirectory: true)
@@ -1286,6 +1343,55 @@ func testSpendServiceUsesPersistedSpendLimit() async throws {
     }
     try expectEqual(snapshot.limitUSD, 40, "spend service should use persisted spend limit")
     try expectEqual(snapshot.percentOfLimit, Decimal(string: "0.25")!, "persisted spend limit should drive percentage")
+}
+
+func testMissingPersistedKeyUsesEnvironmentFallbackForSpendService() async throws {
+    let fileURL = temporaryAPIKeyFileURL()
+    let primaryStore = LocalFileAPIKeyStore(fileURL: fileURL)
+    let store = EnvironmentFallbackAPIKeyStore(
+        primary: primaryStore,
+        environment: FakeEnvironmentProvider(values: ["LITELLM_API_KEY": "env-token"])
+    )
+    let service = SpendService(
+        apiKeyStore: store,
+        clientFactory: { _, apiKey in
+            try! expectEqual(apiKey, "env-token", "spend service should receive env fallback key")
+            return FakeClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+                rowsResult: .success([SpendLogSummaryRow(date: try! fixedDate("2026-05-18"), spendUSD: 10)])
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "expected refreshed result")
+    }
+    try expectEqual(snapshot.totalSpendUSD, 10, "environment fallback should allow spend refresh")
+    try expectEqual(try primaryStore.readAPIKey(), "env-token", "environment fallback should persist env key to the file store")
+}
+
+func testMissingPersistedKeyWithoutEnvironmentStillRequiresSetup() async throws {
+    let store = EnvironmentFallbackAPIKeyStore(
+        primary: LocalFileAPIKeyStore(fileURL: temporaryAPIKeyFileURL()),
+        environment: FakeEnvironmentProvider(values: [:])
+    )
+    let service = SpendService(
+        apiKeyStore: store,
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .failure(LiteLLMClientError.unavailable),
+                rowsResult: .success([])
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case .setupRequired = result else {
+        throw TestFailure(description: "missing persisted key without env should still require setup")
+    }
 }
 
 func snapshot(range: SpendRange = .today, total: Decimal = 8, isStale: Bool = false) throws -> SpendSnapshot {
@@ -2939,6 +3045,10 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testLocalFileAPIKeyStoreSaveReadDelete", testLocalFileAPIKeyStoreSaveReadDelete),
     ("testLocalFileAPIKeyStoreMissingFileMapsToMissingKey", testLocalFileAPIKeyStoreMissingFileMapsToMissingKey),
     ("testLocalFileAPIKeyStoreUsesPrivatePermissions", testLocalFileAPIKeyStoreUsesPrivatePermissions),
+    ("testEnvironmentFallbackUsesPersistedKeyFirst", testEnvironmentFallbackUsesPersistedKeyFirst),
+    ("testEnvironmentFallbackPersistsEnvKeyWhenPrimaryMissing", testEnvironmentFallbackPersistsEnvKeyWhenPrimaryMissing),
+    ("testEnvironmentFallbackMissingEnvStaysMissing", testEnvironmentFallbackMissingEnvStaysMissing),
+    ("testEnvironmentFallbackTrimsEnvValue", testEnvironmentFallbackTrimsEnvValue),
     ("testDoesNotExposeKeyInErrorDescription", testDoesNotExposeKeyInErrorDescription),
     ("testConfigurationStorePersistsSpendLimit", testConfigurationStorePersistsSpendLimit),
     ("testConfigurationStorePersistsBaseURL", testConfigurationStorePersistsBaseURL),
@@ -3045,6 +3155,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testMalformedResponseWithoutCacheReturnsFailed", testMalformedResponseWithoutCacheReturnsFailed),
     ("testUsesConfiguredSpendLimit", testUsesConfiguredSpendLimit),
     ("testSpendServiceUsesPersistedSpendLimit", testSpendServiceUsesPersistedSpendLimit),
+    ("testMissingPersistedKeyUsesEnvironmentFallbackForSpendService", testMissingPersistedKeyUsesEnvironmentFallbackForSpendService),
+    ("testMissingPersistedKeyWithoutEnvironmentStillRequiresSetup", testMissingPersistedKeyWithoutEnvironmentStillRequiresSetup),
     ("testInitialRefreshLoadsTodaySnapshot", testInitialRefreshLoadsTodaySnapshot),
     ("testChangingSpendLimitRefreshesPresentationWithoutNetwork", testChangingSpendLimitRefreshesPresentationWithoutNetwork),
     ("testInvalidSpendLimitShowsSettingsError", testInvalidSpendLimitShowsSettingsError),

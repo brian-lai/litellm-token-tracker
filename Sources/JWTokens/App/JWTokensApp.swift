@@ -38,7 +38,7 @@ final class JWTokensAppDelegate: NSObject, NSApplicationDelegate {
         if let previewViewModel = JWTokensPreviewFixtures.makeViewModelFromArguments() {
             return previewViewModel
         }
-        let apiKeyStore = LocalFileAPIKeyStore()
+        let apiKeyStore = EnvironmentFallbackAPIKeyStore(primary: LocalFileAPIKeyStore())
         let configurationStore = LocalAppConfigurationStore()
         return SpendDashboardViewModel(
             spendService: SpendService(
