@@ -36,6 +36,7 @@ struct SpendPopoverView: View {
                         .foregroundStyle(.tertiary)
                 }
             }
+            detailGrid(rows: presentation.detailRows)
             controlPanel
             if let statusText = presentation.statusText {
                 Text(statusText)
@@ -77,40 +78,68 @@ struct SpendPopoverView: View {
     }
 
     private var rangeSelector: some View {
-        Picker("Range", selection: rangeBinding) {
+        HStack(spacing: 6) {
             ForEach(SpendRange.allCases) { range in
-                Text(range.displayName).tag(range)
-            }
-        }
-        .pickerStyle(.segmented)
-    }
-
-    private var rangeBinding: Binding<SpendRange> {
-        Binding(
-            get: { viewModel.selectedRange },
-            set: { range in
-                Task {
-                    await viewModel.selectRange(range)
+                selectorButton(
+                    title: range.displayName,
+                    isSelected: viewModel.selectedRange == range
+                ) {
+                    Task {
+                        await viewModel.selectRange(range)
+                    }
                 }
             }
-        )
+        }
     }
 
     private var metricSelector: some View {
-        Picker("Menu bar", selection: metricBinding) {
+        HStack(spacing: 6) {
             ForEach(MenuBarMetric.allCases, id: \.self) { metric in
-                Text(metric.displayName).tag(metric)
+                selectorButton(
+                    title: metric.displayName,
+                    isSelected: viewModel.menuBarMetric == metric
+                ) {
+                    viewModel.setMenuBarMetric(metric)
+                }
             }
         }
-        .pickerStyle(.segmented)
     }
 
-    private var metricBinding: Binding<MenuBarMetric> {
-        Binding(
-            get: { viewModel.menuBarMetric },
-            set: { metric in
-                viewModel.setMenuBarMetric(metric)
+    private func selectorButton(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
+                .background(isSelected ? Color.blue.opacity(0.95) : Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(isSelected ? Color.blue.opacity(0.95) : Color.white.opacity(0.16), lineWidth: 1)
+                )
+                .foregroundStyle(.white)
+        }
+        .buttonStyle(.plain)
+        .help(title)
+    }
+
+    private func detailGrid(rows: [SpendPopoverPresentation.DetailRow]) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
+            ForEach(rows) { row in
+                GridRow {
+                    Text(row.label)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(row.value)
+                        .font(.caption.monospacedDigit().weight(.medium))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
             }
-        )
+        }
+        .padding(10)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
     }
 }

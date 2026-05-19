@@ -61,6 +61,16 @@ public struct SpendLogSummaryRow: Equatable, Identifiable, Sendable {
     }
 }
 
+public struct SpendActivitySummary: Equatable, Sendable {
+    public let totalSpendUSD: Decimal
+    public let dailyPoints: [DailySpendPoint]
+
+    public init(totalSpendUSD: Decimal, dailyPoints: [DailySpendPoint]) {
+        self.totalSpendUSD = totalSpendUSD
+        self.dailyPoints = dailyPoints
+    }
+}
+
 public struct SpendSnapshot: Equatable, Sendable {
     public let range: SpendRange
     public let totalSpendUSD: Decimal
@@ -94,6 +104,25 @@ public struct SpendSnapshot: Equatable, Sendable {
 }
 
 public enum SpendAggregator {
+    public static func snapshot(
+        activity: SpendActivitySummary,
+        range: SpendRange,
+        limitUSD: Decimal,
+        refreshedAt: Date,
+        isStale: Bool = false
+    ) -> SpendSnapshot {
+        let percent = limitUSD == 0 ? 0 : activity.totalSpendUSD / limitUSD
+        return SpendSnapshot(
+            range: range,
+            totalSpendUSD: activity.totalSpendUSD,
+            limitUSD: limitUSD,
+            percentOfLimit: percent,
+            dailyPoints: activity.dailyPoints.sorted { $0.date < $1.date },
+            refreshedAt: refreshedAt,
+            isStale: isStale
+        )
+    }
+
     public static func snapshot(
         rows: [SpendLogSummaryRow],
         range: SpendRange,

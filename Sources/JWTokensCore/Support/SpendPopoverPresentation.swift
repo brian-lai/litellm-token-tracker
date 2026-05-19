@@ -1,6 +1,13 @@
 import Foundation
 
 public struct SpendPopoverPresentation: Equatable, Sendable {
+    public struct DetailRow: Equatable, Identifiable, Sendable {
+        public let label: String
+        public let value: String
+
+        public var id: String { label }
+    }
+
     public let primaryGauge: RingProgressPresentation
     public let rangeName: String
     public let totalText: String
@@ -8,6 +15,7 @@ public struct SpendPopoverPresentation: Equatable, Sendable {
     public let limitText: String
     public let overLimitText: String?
     public let refreshedText: String
+    public let detailRows: [DetailRow]
     public let statusText: String?
     public let showsKeyUpdateAction: Bool
     public let menuBarMetric: MenuBarMetric
@@ -36,6 +44,12 @@ public struct SpendPopoverPresentation: Equatable, Sendable {
             limitText: "Limit \(MenuBarTitleFormatter.currency(limit))",
             overLimitText: overLimit ? "\(MenuBarTitleFormatter.currency(total - limit)) over limit" : nil,
             refreshedText: refreshedText(for: snapshot?.refreshedAt, calendar: calendar),
+            detailRows: [
+                DetailRow(label: "Spend", value: MenuBarTitleFormatter.currency(total)),
+                DetailRow(label: "Usage", value: MenuBarTitleFormatter.percent(snapshot?.percentOfLimit ?? 0)),
+                DetailRow(label: "Limit", value: MenuBarTitleFormatter.currency(limit)),
+                DetailRow(label: "Updated", value: refreshedText(for: snapshot?.refreshedAt, calendar: calendar).replacingOccurrences(of: "Updated ", with: ""))
+            ],
             statusText: errorMessage,
             showsKeyUpdateAction: requiresSetup,
             menuBarMetric: menuBarMetric

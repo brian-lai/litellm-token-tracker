@@ -9,6 +9,7 @@ public enum LiteLLMClientError: Error, Equatable {
 
 public protocol LiteLLMClientProtocol: Sendable {
     func fetchCurrentUser() async throws -> LiteLLMUserContext
+    func fetchUserDailyActivity(range: DateRange, userID: String) async throws -> SpendActivitySummary
     func fetchSpendRows(range: DateRange, userID: String) async throws -> [SpendLogSummaryRow]
 }
 
@@ -41,6 +42,16 @@ public struct LiteLLMClient: LiteLLMClientProtocol {
         return result.rows
     }
 
+    public func fetchUserDailyActivity(range: DateRange, userID: String) async throws -> SpendActivitySummary {
+        let request = try makeUserDailyActivityRequest(range: range, userID: userID)
+        let data = try await perform(request, endpoint: "/user/daily/activity").data
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = range.timeZone
+        let result = try LiteLLMResponseDecoder.decodeUserDailyActivity(from: data, calendar: calendar)
+        logger.log(AppLogEvent(correlationID: correlationID(), endpoint: "/user/daily/activity", rowCount: result.summary.dailyPoints.count, skippedRowCount: result.skippedRowCount))
+        return result.summary
+    }
+
     public func makeSpendRowsRequest(range: DateRange, userID: String) throws -> URLRequest {
         let formatter = DateFormatter.liteLLMRequestDay(timeZone: range.timeZone)
         var components = URLComponents(url: baseURL.appendingPathComponent("spend/logs"), resolvingAgainstBaseURL: false)
@@ -49,6 +60,23 @@ public struct LiteLLMClient: LiteLLMClientProtocol {
             URLQueryItem(name: "start_date", value: formatter.string(from: range.startDate)),
             URLQueryItem(name: "end_date", value: formatter.string(from: range.endDate)),
             URLQueryItem(name: "summarize", value: "true")
+        ]
+        guard let url = components?.url else {
+            throw LiteLLMClientError.malformedResponse
+        }
+        return makeRequest(url: url)
+    }
+
+    public func makeUserDailyActivityRequest(range: DateRange, userID: String) throws -> URLRequest {
+        let formatter = DateFormatter.liteLLMRequestDay(timeZone: range.timeZone)
+        let inclusiveEndDate = Calendar.gregorian(timeZone: range.timeZone).date(byAdding: .day, value: -1, to: range.endDate) ?? range.endDate
+        var components = URLComponents(url: baseURL.appendingPathComponent("user/daily/activity"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "user_id", value: userID),
+            URLQueryItem(name: "start_date", value: formatter.string(from: range.startDate)),
+            URLQueryItem(name: "end_date", value: formatter.string(from: inclusiveEndDate)),
+            URLQueryItem(name: "timezone", value: String(range.timeZone.liteLLMTimezoneOffsetMinutes(for: range.startDate))),
+            URLQueryItem(name: "page_size", value: "1000")
         ]
         guard let url = components?.url else {
             throw LiteLLMClientError.malformedResponse
@@ -108,5 +136,19 @@ private extension DateFormatter {
         formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
+    }
+}
+
+private extension Calendar {
+    static func gregorian(timeZone: TimeZone) -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        return calendar
+    }
+}
+
+private extension TimeZone {
+    func liteLLMTimezoneOffsetMinutes(for date: Date) -> Int {
+        -secondsFromGMT(for: date) / 60
     }
 }

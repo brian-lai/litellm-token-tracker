@@ -1,0 +1,25 @@
+{
+  "metadata": {
+    "total_spend": 65.5663
+  },
+  "results": [
+    {
+      "date": "2026-05-19",
+      "metrics": {
+        "spend": 17.067627950000004
+      }
+    },
+    {
+      "date": "2026-05-18",
+      "metrics": {
+        "spend": 48.498672049999996
+      }
+    },
+    {
+      "date": "not-a-date",
+      "metrics": {
+        "spend": 1
+      }
+    }
+  ]
+}
