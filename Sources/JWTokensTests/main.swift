@@ -864,6 +864,36 @@ func testRingPresentationAccessibilityIncludesBandAndRange() throws {
     try expect(presentation.accessibilityLabel.contains("orange band"), "accessibility should include band")
 }
 
+func testMenuBarPreferenceDefaultsToDollars() throws {
+    let suiteName = "jw_tokens.preference.defaults.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsMenuBarPreferenceStore(defaults: defaults)
+
+    try expectEqual(try store.loadMetric(), .dollars, "missing preference should default to dollars")
+}
+
+func testMenuBarPreferencePersistsPercentMetric() throws {
+    let suiteName = "jw_tokens.preference.percent.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsMenuBarPreferenceStore(defaults: defaults)
+
+    try store.saveMetric(.percent)
+
+    try expectEqual(try store.loadMetric(), .percent, "saved metric should load back from UserDefaults")
+}
+
+func testMenuBarPreferenceFallsBackOnInvalidRawValue() throws {
+    let suiteName = "jw_tokens.preference.invalid.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defaults.set("invalid", forKey: UserDefaultsMenuBarPreferenceStore.metricKey)
+    let store = UserDefaultsMenuBarPreferenceStore(defaults: defaults)
+
+    try expectEqual(try store.loadMetric(), .dollars, "invalid preference should fall back to dollars")
+}
+
 let syncTests: [(String, () throws -> Void)] = [
     ("testTestRunnerLoadsCoreTarget", testTestRunnerLoadsCoreTarget),
     ("testDecodesUserInfoSpendAndBudget", testDecodesUserInfoSpendAndBudget),
@@ -894,7 +924,10 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testRingPresentationFormatsDollarMetric", testRingPresentationFormatsDollarMetric),
     ("testRingPresentationFormatsPercentMetric", testRingPresentationFormatsPercentMetric),
     ("testRingPresentationHandlesNilSnapshot", testRingPresentationHandlesNilSnapshot),
-    ("testRingPresentationAccessibilityIncludesBandAndRange", testRingPresentationAccessibilityIncludesBandAndRange)
+    ("testRingPresentationAccessibilityIncludesBandAndRange", testRingPresentationAccessibilityIncludesBandAndRange),
+    ("testMenuBarPreferenceDefaultsToDollars", testMenuBarPreferenceDefaultsToDollars),
+    ("testMenuBarPreferencePersistsPercentMetric", testMenuBarPreferencePersistsPercentMetric),
+    ("testMenuBarPreferenceFallsBackOnInvalidRawValue", testMenuBarPreferenceFallsBackOnInvalidRawValue)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [
