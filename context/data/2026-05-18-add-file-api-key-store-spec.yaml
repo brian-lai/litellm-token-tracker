@@ -1,0 +1,28 @@
+name: add-file-api-key-store
+date: 2026-05-18
+scope:
+  - Avoid repeated macOS Keychain prompts during local rebuilds.
+  - Store the LiteLLM API key in a local file by default.
+  - Preserve the existing APIKeyStoring boundary.
+credential_store:
+  default_path: ~/.config/jw_tokens/litellm_api_key
+  directory_permissions: "0700"
+  file_permissions: "0600"
+  behavior:
+    read:
+      - trim surrounding whitespace/newlines
+      - empty or missing file maps to missingKey
+    save:
+      - create parent directory if needed
+      - write API key atomically
+      - set file permissions after write
+    delete:
+      - remove the file
+      - missing file is success
+security_notes:
+  - This avoids Keychain code-signature prompts in local development.
+  - The file is plaintext and protected by local filesystem permissions only.
+tests:
+  - testLocalFileAPIKeyStoreSaveReadDelete
+  - testLocalFileAPIKeyStoreMissingFileMapsToMissingKey
+  - testLocalFileAPIKeyStoreUsesPrivatePermissions

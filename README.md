@@ -28,20 +28,22 @@ swift run JWTokensTests
 
 ## LiteLLM API Key
 
-The app stores the LiteLLM API key in the macOS Keychain under:
+The local app stores the LiteLLM API key in:
 
-- Service: `net.justworks.jw-tokens`
-- Account: `litellm-api-key`
+- `~/.config/jw_tokens/litellm_api_key`
 
-You can set the key from the app when it shows `Set API Key`, or seed it from the terminal:
+The file is plaintext and should be readable only by your user account. The app creates the directory with `0700` permissions and the key file with `0600` permissions.
+
+You can set the key from the app when it shows `Set API Key`, or seed it from the terminal without using Keychain:
 
 ```bash
-security add-generic-password \
-  -U \
-  -s net.justworks.jw-tokens \
-  -a litellm-api-key \
-  -w "$LITELLM_API_KEY"
+mkdir -p ~/.config/jw_tokens
+chmod 700 ~/.config/jw_tokens
+printf '%s' "$LITELLM_API_KEY" > ~/.config/jw_tokens/litellm_api_key
+chmod 600 ~/.config/jw_tokens/litellm_api_key
 ```
+
+The core package still includes `KeychainAPIKeyStore` for future signed/distributed builds, but the local app defaults to the file store so rebuilds do not trigger repeated Keychain access prompts.
 
 The default LiteLLM base URL is `https://litellm.justworksai.net`, and the default spend limit is `$80`.
 
