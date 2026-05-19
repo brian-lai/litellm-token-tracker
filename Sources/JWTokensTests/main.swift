@@ -1043,6 +1043,30 @@ func testMenuBarPreferenceFallsBackOnInvalidRawValue() throws {
     try expectEqual(try store.loadMetric(), .dollars, "invalid preference should fall back to dollars")
 }
 
+func testMetricSelectorShowsDollarsAndPercentOptions() throws {
+    try expectEqual(MenuBarMetric.allCases.map(\.displayName), ["Dollars", "Percent"], "metric selector should expose dollars and percent")
+}
+
+@MainActor
+func testChangingMetricDoesNotRefreshSpend() async throws {
+    let service = RecordingSpendService(results: [])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    viewModel.setMenuBarMetric(.percent)
+
+    try expectEqual(service.requestedRanges, [], "changing display metric should not refresh spend")
+}
+
+@MainActor
+func testChangingMetricUpdatesMenuBarPresentation() async throws {
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []))
+    viewModel.menuBarSnapshot = try snapshot(range: .today, total: 40)
+
+    viewModel.setMenuBarMetric(.percent)
+
+    try expectEqual(viewModel.menuBarPresentation.label, "50%", "changing metric should update menu bar presentation")
+}
+
 let syncTests: [(String, () throws -> Void)] = [
     ("testTestRunnerLoadsCoreTarget", testTestRunnerLoadsCoreTarget),
     ("testDecodesUserInfoSpendAndBudget", testDecodesUserInfoSpendAndBudget),
@@ -1079,7 +1103,8 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testMenuBarRingAccessibilityLabelIncludesSpendAndBand", testMenuBarRingAccessibilityLabelIncludesSpendAndBand),
     ("testMenuBarPreferenceDefaultsToDollars", testMenuBarPreferenceDefaultsToDollars),
     ("testMenuBarPreferencePersistsPercentMetric", testMenuBarPreferencePersistsPercentMetric),
-    ("testMenuBarPreferenceFallsBackOnInvalidRawValue", testMenuBarPreferenceFallsBackOnInvalidRawValue)
+    ("testMenuBarPreferenceFallsBackOnInvalidRawValue", testMenuBarPreferenceFallsBackOnInvalidRawValue),
+    ("testMetricSelectorShowsDollarsAndPercentOptions", testMetricSelectorShowsDollarsAndPercentOptions)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [
@@ -1113,7 +1138,9 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testViewModelFallsBackWhenPreferenceLoadFails", testViewModelFallsBackWhenPreferenceLoadFails),
     ("testMenuBarPresentationRemainsTodayWhenPopoverRangeChanges", testMenuBarPresentationRemainsTodayWhenPopoverRangeChanges),
     ("testAutomaticRefreshUpdatesMenuBarSnapshotAndSelectedRange", testAutomaticRefreshUpdatesMenuBarSnapshotAndSelectedRange),
-    ("testAuthFailurePreservesMenuBarSnapshot", testAuthFailurePreservesMenuBarSnapshot)
+    ("testAuthFailurePreservesMenuBarSnapshot", testAuthFailurePreservesMenuBarSnapshot),
+    ("testChangingMetricDoesNotRefreshSpend", testChangingMetricDoesNotRefreshSpend),
+    ("testChangingMetricUpdatesMenuBarPresentation", testChangingMetricUpdatesMenuBarPresentation)
 ]
 
 var failures: [String] = []

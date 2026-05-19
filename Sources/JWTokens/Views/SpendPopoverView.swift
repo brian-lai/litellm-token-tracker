@@ -14,6 +14,7 @@ struct SpendPopoverView: View {
 
         VStack(alignment: .leading, spacing: 12) {
             rangeSelector
+            metricSelector
             VStack(alignment: .leading, spacing: 4) {
                 Text(presentation.rangeName)
                     .font(.caption)
@@ -74,6 +75,24 @@ struct SpendPopoverView: View {
                 Task {
                     await viewModel.selectRange(range)
                 }
+            }
+        )
+    }
+
+    private var metricSelector: some View {
+        Picker("Menu bar", selection: metricBinding) {
+            ForEach(MenuBarMetric.allCases, id: \.self) { metric in
+                Text(metric.displayName).tag(metric)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    private var metricBinding: Binding<MenuBarMetric> {
+        Binding(
+            get: { viewModel.menuBarMetric },
+            set: { metric in
+                viewModel.setMenuBarMetric(metric)
             }
         )
     }

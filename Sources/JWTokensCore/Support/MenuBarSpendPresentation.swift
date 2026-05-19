@@ -3,6 +3,15 @@ import Foundation
 public enum MenuBarMetric: String, CaseIterable, Sendable {
     case dollars
     case percent
+
+    public var displayName: String {
+        switch self {
+        case .dollars:
+            return "Dollars"
+        case .percent:
+            return "Percent"
+        }
+    }
 }
 
 public struct SpendStatusBand: Equatable, Sendable {
