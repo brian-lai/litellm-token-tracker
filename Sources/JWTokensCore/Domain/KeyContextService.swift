@@ -76,6 +76,7 @@ public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
             save(snapshot: snapshot, userContext: user, scope: scope)
             return .refreshed(snapshot)
         } catch LiteLLMClientError.unauthorized {
+            clearCache()
             return .authFailed(message: "LiteLLM key context was rejected")
         } catch {
             if let currentScope, let stale = loadAnyCache(scope: currentScope) {

@@ -2263,6 +2263,29 @@ func testKeyContextDoesNotReturnStaleAcrossCredentialChangeOnFailure() async thr
     }
 }
 
+func testKeyContextAuthFailureClearsServiceCache() async throws {
+    let client = RecordingKeyClient(
+        userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        currentKeyResult: .success(keySummary(alias: "First", spend: 1)),
+        userKeysResult: .success([])
+    )
+    let service = KeyContextService(apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")), clientFactory: { _, _ in client })
+    let user = LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)
+
+    _ = await service.refresh(userContext: user, now: try fixedDate("2026-05-18"))
+    client.currentKeyResult = .failure(LiteLLMClientError.unauthorized)
+    let authResult = await service.refresh(userContext: user, now: try fixedDate("2026-05-18").addingTimeInterval(301))
+    client.currentKeyResult = .failure(LiteLLMClientError.unavailable)
+    let failureResult = await service.refresh(userContext: user, now: try fixedDate("2026-05-18").addingTimeInterval(602))
+
+    guard case .authFailed = authResult else {
+        throw TestFailure(description: "expected key auth failure")
+    }
+    guard case .failed = failureResult else {
+        throw TestFailure(description: "auth failure should clear service cache so later failures do not re-expose stale key context")
+    }
+}
+
 func testCachedUserContextIsScopedByCredential() async throws {
     let store = MutableAPIKeyStore()
     try store.saveAPIKey("first-key")
@@ -2537,6 +2560,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testManualKeyContextRefreshBypassesFreshCache", testManualKeyContextRefreshBypassesFreshCache),
     ("testKeyContextCacheIsScopedByCredential", testKeyContextCacheIsScopedByCredential),
     ("testKeyContextDoesNotReturnStaleAcrossCredentialChangeOnFailure", testKeyContextDoesNotReturnStaleAcrossCredentialChangeOnFailure),
+    ("testKeyContextAuthFailureClearsServiceCache", testKeyContextAuthFailureClearsServiceCache),
     ("testCachedUserContextIsScopedByCredential", testCachedUserContextIsScopedByCredential),
     ("testRefreshFetchesUserThenTodaySpend", testRefreshFetchesUserThenTodaySpend),
     ("testRefreshPrefersDailyActivitySummary", testRefreshPrefersDailyActivitySummary),
