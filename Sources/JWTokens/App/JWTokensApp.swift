@@ -7,7 +7,7 @@ struct JWTokensApp: App {
     @State private var refreshCoordinator: SpendRefreshCoordinator?
 
     var body: some Scene {
-        MenuBarExtra(viewModel.menuBarTitle) {
+        MenuBarExtra {
             SpendPopoverView(viewModel: viewModel)
                 .task {
                     if refreshCoordinator == nil {
@@ -17,6 +17,8 @@ struct JWTokensApp: App {
                     }
                     await viewModel.refresh()
                 }
+        } label: {
+            MenuBarRingLabelView(presentation: viewModel.menuBarPresentation)
         }
     }
 
@@ -29,7 +31,8 @@ struct JWTokensApp: App {
                     LiteLLMClient(baseURL: baseURL, apiKey: apiKey)
                 }
             ),
-            apiKeyStore: apiKeyStore
+            apiKeyStore: apiKeyStore,
+            menuBarPreferenceStore: UserDefaultsMenuBarPreferenceStore()
         )
     }
 }

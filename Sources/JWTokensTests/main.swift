@@ -915,6 +915,39 @@ func testAuthFailurePreservesMenuBarSnapshot() async throws {
     try expect(viewModel.pausesAutomaticRefresh, "auth failure should pause automatic refresh")
 }
 
+func testMenuBarPresentationUsesTodaySnapshot() throws {
+    let presentation = MenuBarSpendPresentation.make(
+        menuBarSnapshot: try snapshot(range: .today, total: 12),
+        requiresSetup: false,
+        metric: .dollars
+    )
+
+    try expectEqual(presentation.label, "$12", "menu bar presentation should use today's snapshot")
+    try expectEqual(presentation.progress, 0.15, "menu bar presentation should compute progress from today's snapshot")
+}
+
+func testMenuBarPresentationUsesSetupState() throws {
+    let presentation = MenuBarSpendPresentation.make(
+        menuBarSnapshot: nil,
+        requiresSetup: true,
+        metric: .dollars
+    )
+
+    try expectEqual(presentation.label, "Set API Key", "setup state should show compact setup label")
+    try expectEqual(presentation.setupTitle, "Set API Key", "setup title should be present")
+}
+
+func testMenuBarRingAccessibilityLabelIncludesSpendAndBand() throws {
+    let presentation = MenuBarSpendPresentation.make(
+        menuBarSnapshot: try snapshot(range: .today, total: 76),
+        requiresSetup: false,
+        metric: .percent
+    )
+
+    try expect(presentation.accessibilityLabel.contains("95%"), "accessibility should include spend percent")
+    try expect(presentation.accessibilityLabel.contains("red band"), "accessibility should include band")
+}
+
 func testSpendStatusBandThresholds() throws {
     try expectEqual(SpendStatusBand.band(for: Decimal(string: "0.49")!), .green, "under 50 percent should be green")
     try expectEqual(SpendStatusBand.band(for: Decimal(string: "0.50")!), .yellow, "50 percent should be yellow")
@@ -1041,6 +1074,9 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testRingPresentationFormatsPercentMetric", testRingPresentationFormatsPercentMetric),
     ("testRingPresentationHandlesNilSnapshot", testRingPresentationHandlesNilSnapshot),
     ("testRingPresentationAccessibilityIncludesBandAndRange", testRingPresentationAccessibilityIncludesBandAndRange),
+    ("testMenuBarPresentationUsesTodaySnapshot", testMenuBarPresentationUsesTodaySnapshot),
+    ("testMenuBarPresentationUsesSetupState", testMenuBarPresentationUsesSetupState),
+    ("testMenuBarRingAccessibilityLabelIncludesSpendAndBand", testMenuBarRingAccessibilityLabelIncludesSpendAndBand),
     ("testMenuBarPreferenceDefaultsToDollars", testMenuBarPreferenceDefaultsToDollars),
     ("testMenuBarPreferencePersistsPercentMetric", testMenuBarPreferencePersistsPercentMetric),
     ("testMenuBarPreferenceFallsBackOnInvalidRawValue", testMenuBarPreferenceFallsBackOnInvalidRawValue)
