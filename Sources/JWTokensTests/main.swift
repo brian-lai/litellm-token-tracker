@@ -912,8 +912,11 @@ func testConfigurationStoreNormalizesSecretBearingBaseURLOnLoad() throws {
     let store = LocalAppConfigurationStore(fileURL: fileURL)
 
     let configuration = try store.loadConfiguration()
+    let rawConfig = try String(contentsOf: fileURL, encoding: .utf8)
 
     try expectEqual(configuration.baseURL.absoluteString, "https://litellm.example.internal/v1", "configuration store should normalize existing secret-bearing base URLs")
+    try expect(!rawConfig.contains("secret-token"), "configuration load should scrub existing URL userinfo secrets from disk")
+    try expect(!rawConfig.contains("sk-should-not-display"), "configuration load should scrub existing URL query secrets from disk")
 }
 
 func testRefreshFetchesUserThenTodaySpend() async throws {
@@ -1264,6 +1267,21 @@ func testChangingBaseURLClearsSpendSnapshots() async throws {
     try expectEqual(viewModel.currentSnapshot, nil, "base URL changes should clear current spend from the old endpoint")
     try expectEqual(viewModel.menuBarSnapshot, nil, "base URL changes should clear menu bar spend from the old endpoint")
     try expectEqual(viewModel.currentAnalyticsSummary, nil, "base URL changes should clear analytics from the old endpoint")
+}
+
+@MainActor
+func testChangingBaseURLPreservesSetupPauseState() async throws {
+    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.justworksai.net")!, spendLimitUSD: 80))
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), configurationStore: configurationStore)
+    viewModel.requiresSetup = true
+    viewModel.pausesAutomaticRefresh = true
+    viewModel.baseURLDraft = "https://litellm.example.internal"
+
+    viewModel.saveBaseURL()
+
+    try expect(viewModel.requiresSetup, "base URL changes should not hide existing setup state")
+    try expect(viewModel.pausesAutomaticRefresh, "base URL changes should not resume automatic refresh when setup is still required")
 }
 
 @MainActor
@@ -2898,6 +2916,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testInvalidSpendLimitShowsSettingsError", testInvalidSpendLimitShowsSettingsError),
     ("testInvalidBaseURLShowsSettingsError", testInvalidBaseURLShowsSettingsError),
     ("testChangingBaseURLClearsSpendSnapshots", testChangingBaseURLClearsSpendSnapshots),
+    ("testChangingBaseURLPreservesSetupPauseState", testChangingBaseURLPreservesSetupPauseState),
     ("testAPIKeyChangeClearsSpendSnapshots", testAPIKeyChangeClearsSpendSnapshots),
     ("testClearingAPIKeyClearsSpendSnapshots", testClearingAPIKeyClearsSpendSnapshots),
     ("testSelectingRangeFetchesThatRange", testSelectingRangeFetchesThatRange),

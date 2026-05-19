@@ -147,7 +147,7 @@ public final class SpendDashboardViewModel {
             try configurationStore.saveConfiguration(AppConfiguration(baseURL: baseURL, spendLimitUSD: currentConfiguration.spendLimitUSD))
             baseURLDraft = baseURL.absoluteString
             settingsErrorMessage = nil
-            apiKeyDidChange()
+            clearEndpointScopedState()
         } catch {
             settingsErrorMessage = "Unable to save settings"
         }
@@ -203,11 +203,7 @@ public final class SpendDashboardViewModel {
     public func apiKeyDidChange() {
         pausesAutomaticRefresh = false
         requiresSetup = false
-        clearSpendSnapshots()
-        keyContextSnapshot = nil
-        keyContextErrorMessage = nil
-        userContext = nil
-        keyContextService?.clearCache()
+        clearEndpointScopedState()
     }
 
     public func saveAPIKey() {
@@ -281,5 +277,13 @@ public final class SpendDashboardViewModel {
         currentSnapshot = nil
         menuBarSnapshot = nil
         currentAnalyticsSummary = nil
+    }
+
+    private func clearEndpointScopedState() {
+        clearSpendSnapshots()
+        keyContextSnapshot = nil
+        keyContextErrorMessage = nil
+        userContext = nil
+        keyContextService?.clearCache()
     }
 }

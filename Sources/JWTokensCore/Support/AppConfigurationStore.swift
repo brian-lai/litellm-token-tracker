@@ -53,10 +53,14 @@ public struct LocalAppConfigurationStore: MutableAppConfigurationStoring {
         do {
             let data = try Data(contentsOf: fileURL)
             let stored = try JSONDecoder().decode(StoredConfiguration.self, from: data)
-            return AppConfiguration(
+            let configuration = AppConfiguration(
                 baseURL: stored.validBaseURL ?? defaults.baseURL,
                 spendLimitUSD: stored.validSpendLimit ?? defaults.spendLimitUSD
             )
+            if stored.needsNormalization(comparedTo: configuration) {
+                try? saveConfiguration(configuration)
+            }
+            return configuration
         } catch {
             return defaults
         }
@@ -100,6 +104,10 @@ private struct StoredConfiguration: Codable {
             return nil
         }
         return value
+    }
+
+    func needsNormalization(comparedTo configuration: AppConfiguration) -> Bool {
+        baseURL != configuration.baseURL.absoluteString || spendLimitUSD != NSDecimalNumber(decimal: configuration.spendLimitUSD).stringValue
     }
 }
 
