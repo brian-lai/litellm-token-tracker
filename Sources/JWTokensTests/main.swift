@@ -1157,6 +1157,63 @@ func testPopoverPresentationIncludesMetricRows() throws {
     try expectEqual(rows["Updated"], "12:00 AM", "detail rows should include refresh time")
 }
 
+func testOverviewPresentationShowsTokenTotals() throws {
+    let analytics = SpendAnalyticsSummary(
+        totalSpendUSD: 8,
+        totals: SpendUsageTotals(
+            totalTokens: 12345,
+            promptTokens: 5000,
+            completionTokens: 7345,
+            cacheCreationTokens: 100,
+            cacheReadTokens: 200,
+            apiRequests: 7,
+            successfulRequests: 6,
+            failedRequests: 1
+        ),
+        dailyPoints: [],
+        breakdowns: [:],
+        source: .userDailyActivity
+    )
+    let snapshot = SpendSnapshot(
+        range: .today,
+        totalSpendUSD: 8,
+        limitUSD: 80,
+        percentOfLimit: Decimal(string: "0.1")!,
+        dailyPoints: [],
+        refreshedAt: try fixedDate("2026-05-18"),
+        isStale: false,
+        analytics: analytics
+    )
+    let presentation = SpendPopoverPresentation.make(range: .today, snapshot: snapshot, errorMessage: nil, requiresSetup: false, calendar: fixedCalendar())
+    let rows = Dictionary(uniqueKeysWithValues: presentation.detailRows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Tokens"], "12,345", "overview should show total token count")
+}
+
+func testOverviewPresentationShowsRequestTotals() throws {
+    let analytics = SpendAnalyticsSummary(
+        totalSpendUSD: 8,
+        totals: SpendUsageTotals(totalTokens: 0, promptTokens: 0, completionTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, apiRequests: 7, successfulRequests: 6, failedRequests: 1),
+        dailyPoints: [],
+        breakdowns: [:],
+        source: .userDailyActivity
+    )
+    let snapshot = SpendSnapshot(range: .today, totalSpendUSD: 8, limitUSD: 80, percentOfLimit: Decimal(string: "0.1")!, dailyPoints: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false, analytics: analytics)
+    let presentation = SpendPopoverPresentation.make(range: .today, snapshot: snapshot, errorMessage: nil, requiresSetup: false, calendar: fixedCalendar())
+    let rows = Dictionary(uniqueKeysWithValues: presentation.detailRows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Requests"], "7 (6 ok, 1 fail)", "overview should show request success and failure counts")
+}
+
+func testOverviewPresentationShowsDataSource() throws {
+    let analytics = SpendAnalyticsSummary(totalSpendUSD: 8, totals: .zero, dailyPoints: [], breakdowns: [:], source: .spendLogsFallback)
+    let snapshot = SpendSnapshot(range: .today, totalSpendUSD: 8, limitUSD: 80, percentOfLimit: Decimal(string: "0.1")!, dailyPoints: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false, analytics: analytics)
+    let presentation = SpendPopoverPresentation.make(range: .today, snapshot: snapshot, errorMessage: nil, requiresSetup: false, calendar: fixedCalendar())
+    let rows = Dictionary(uniqueKeysWithValues: presentation.detailRows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Source"], "Spend logs fallback", "overview should show analytics source")
+}
+
 func testPopoverPresentationShowsOverLimitState() throws {
     let presentation = SpendPopoverPresentation.make(
         range: .today,
@@ -1294,6 +1351,161 @@ func testDailyChartPresentationScalesThirtyPoints() throws {
     try expectEqual(presentation.bars.count, 30, "chart should support thirty daily points")
     try expectEqual(presentation.bars.last?.heightRatio, 1, "largest point should scale to full height")
     try expect(presentation.accessibilityLabel.contains("30 days"), "chart accessibility should include day count")
+}
+
+func testTrendPresentationIncludesDailySpendAndTokens() throws {
+    let analytics = SpendAnalyticsSummary(
+        totalSpendUSD: 12,
+        totals: SpendUsageTotals(totalTokens: 300, promptTokens: 100, completionTokens: 200, cacheCreationTokens: 0, cacheReadTokens: 0, apiRequests: 3, successfulRequests: 3, failedRequests: 0),
+        dailyPoints: [
+            DailyActivityPoint(
+                date: try fixedDate("2026-05-18"),
+                spendUSD: 12,
+                totals: SpendUsageTotals(totalTokens: 300, promptTokens: 100, completionTokens: 200, cacheCreationTokens: 0, cacheReadTokens: 0, apiRequests: 3, successfulRequests: 3, failedRequests: 0)
+            )
+        ],
+        breakdowns: [:],
+        source: .userDailyActivity
+    )
+
+    let presentation = TrendPresentation.make(analytics: analytics, calendar: fixedCalendar())
+
+    try expectEqual(presentation.totalText, "$12.00", "trend presentation should show range total")
+    try expectEqual(presentation.tokenSummary, "300 tokens", "trend presentation should show token summary")
+    try expectEqual(presentation.requestSummary, "3 requests", "trend presentation should show request summary")
+    try expectEqual(presentation.days.first?.amountText, "$12.00", "daily trend should show spend")
+    try expectEqual(presentation.days.first?.tokenText, "300 tokens", "daily trend should show daily tokens")
+}
+
+func testTrendPresentationScalesLongRanges() throws {
+    let points = try (0..<30).map { index in
+        DailyActivityPoint(date: try fixedDate("2026-05-01").addingTimeInterval(TimeInterval(index * 86400)), spendUSD: Decimal(index + 1), totals: .zero)
+    }
+    let analytics = SpendAnalyticsSummary(totalSpendUSD: 465, totals: .zero, dailyPoints: points, breakdowns: [:], source: .userDailyActivity)
+
+    let presentation = TrendPresentation.make(analytics: analytics, calendar: fixedCalendar())
+
+    try expectEqual(presentation.days.count, 30, "trend presentation should preserve long ranges")
+    try expectEqual(presentation.days.last?.heightRatio, 1, "largest day should scale to full height")
+    try expect(presentation.accessibilityLabel.contains("30 days"), "trend accessibility should include range density")
+}
+
+func testTrendPresentationBucketsYearToDateScaleInput() throws {
+    let points = try (0..<180).map { index in
+        DailyActivityPoint(date: try fixedDate("2026-01-01").addingTimeInterval(TimeInterval(index * 86400)), spendUSD: Decimal(index + 1), totals: .zero)
+    }
+    let analytics = SpendAnalyticsSummary(totalSpendUSD: 16290, totals: .zero, dailyPoints: points, breakdowns: [:], source: .userDailyActivity)
+
+    let presentation = TrendPresentation.make(analytics: analytics, calendar: fixedCalendar())
+
+    try expectEqual(presentation.days.count, TrendPresentation.maximumRenderedDays, "trend presentation should bucket YTD-scale data to fit the popover")
+    try expectEqual(presentation.days.last?.heightRatio, 1, "largest bucket should scale to full height")
+    try expect(presentation.accessibilityLabel.contains("180 days"), "trend accessibility should preserve original day count")
+}
+
+func testTrendPresentationHandlesEmptyActivity() throws {
+    let analytics = SpendAnalyticsSummary(totalSpendUSD: 0, totals: .zero, dailyPoints: [], breakdowns: [:], source: .userDailyActivity)
+    let presentation = TrendPresentation.make(analytics: analytics, calendar: fixedCalendar())
+
+    try expect(presentation.isEmpty, "empty trend presentation should be explicit")
+    try expectEqual(presentation.days.count, 0, "empty trend should have no day rows")
+    try expectEqual(presentation.accessibilityLabel, "Spend trend, no daily activity", "empty trend should have accessible summary")
+}
+
+func testModelBreakdownSortsBySpendDescending() throws {
+    let analytics = SpendAnalyticsSummary(
+        totalSpendUSD: 10,
+        totals: .zero,
+        dailyPoints: [],
+        breakdowns: [.models: [
+            SpendBreakdownItem(label: "small-model", spendUSD: 2, tokens: 100, requests: 1),
+            SpendBreakdownItem(label: "large-model", spendUSD: 8, tokens: 400, requests: 2)
+        ]],
+        source: .userDailyActivity
+    )
+
+    let presentation = BreakdownPresentation.make(analytics: analytics)
+
+    try expectEqual(presentation.rows.map(\.label), ["large-model", "small-model"], "model breakdown should sort by spend descending")
+}
+
+func testModelBreakdownComputesPercentOfTotal() throws {
+    let analytics = SpendAnalyticsSummary(
+        totalSpendUSD: 10,
+        totals: .zero,
+        dailyPoints: [],
+        breakdowns: [.models: [
+            SpendBreakdownItem(label: "large-model", spendUSD: 8, tokens: 400, requests: 2),
+            SpendBreakdownItem(label: "small-model", spendUSD: 2, tokens: 100, requests: 1)
+        ]],
+        source: .userDailyActivity
+    )
+
+    let presentation = BreakdownPresentation.make(analytics: analytics)
+
+    try expectEqual(presentation.rows.first?.percentText, "80%", "breakdown percent should be presentation-derived")
+    try expectEqual(presentation.rows.first?.share, 0.8, "breakdown share should be selected breakdown total fraction")
+    try expectEqual(presentation.rows.first?.tokenText, "400 tokens", "breakdown should show optional tokens")
+    try expectEqual(presentation.rows.first?.requestText, "2 requests", "breakdown should show optional requests")
+}
+
+func testModelBreakdownShowsEmptyStateWhenUnavailable() throws {
+    let analytics = SpendAnalyticsSummary(totalSpendUSD: 0, totals: .zero, dailyPoints: [], breakdowns: [:], source: .spendLogsFallback)
+    let presentation = BreakdownPresentation.make(analytics: analytics)
+
+    try expect(presentation.isEmpty, "missing model breakdown should show empty state")
+    try expectEqual(presentation.emptyText, "No model breakdown available", "empty breakdown should be clear")
+}
+
+func testModelBreakdownCapsDenseListsWithOther() throws {
+    let items = (0..<12).map { index in
+        SpendBreakdownItem(label: "model-\(index)", spendUSD: Decimal(12 - index), tokens: nil, requests: nil)
+    }
+    let analytics = SpendAnalyticsSummary(totalSpendUSD: 78, totals: .zero, dailyPoints: [], breakdowns: [.models: items], source: .userDailyActivity)
+
+    let presentation = BreakdownPresentation.make(analytics: analytics)
+
+    try expectEqual(presentation.rows.count, BreakdownPresentation.maximumRows, "dense model lists should be capped")
+    try expectEqual(presentation.rows.last?.label, "Other", "overflow model spend should aggregate into Other")
+}
+
+func testModelBreakdownZeroTotalRowsHaveZeroShare() throws {
+    let analytics = SpendAnalyticsSummary(
+        totalSpendUSD: 0,
+        totals: .zero,
+        dailyPoints: [],
+        breakdowns: [.models: [
+            SpendBreakdownItem(label: "zero-a", spendUSD: 0, tokens: nil, requests: nil),
+            SpendBreakdownItem(label: "zero-b", spendUSD: 0, tokens: nil, requests: nil)
+        ]],
+        source: .userDailyActivity
+    )
+
+    let presentation = BreakdownPresentation.make(analytics: analytics)
+
+    try expectEqual(presentation.rows.map(\.percentText), ["0%", "0%"], "zero-total breakdown rows should show zero percent")
+    try expectEqual(presentation.rows.map(\.share), [0, 0], "zero-total breakdown rows should have zero-width shares")
+}
+
+func testPreviewFixtureIncludesAdvancedAnalytics() throws {
+    let analytics = SpendAnalyticsPreviewFixture.advanced(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expect(analytics.totals.totalTokens > 0, "advanced preview fixture should include token totals")
+    try expect(!(analytics.breakdowns[.models] ?? []).isEmpty, "advanced preview fixture should include model breakdowns")
+}
+
+func testPreviewFixtureIncludesLongModelNames() throws {
+    let analytics = SpendAnalyticsPreviewFixture.longModelNames(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    let longest = (analytics.breakdowns[.models] ?? []).map(\.label).max { $0.count < $1.count } ?? ""
+
+    try expect(longest.count > 40, "long model preview fixture should exercise truncation")
+}
+
+func testPreviewFixtureIncludesEmptyBreakdownAndFallbackSource() throws {
+    let analytics = SpendAnalyticsPreviewFixture.fallbackSource(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(analytics.source, .spendLogsFallback, "fallback preview should expose fallback source")
+    try expectEqual(analytics.breakdowns[.models], nil, "fallback preview should have no model breakdown")
 }
 
 @MainActor
@@ -1665,6 +1877,29 @@ func testMetricSelectorShowsDollarsAndPercentOptions() throws {
 }
 
 @MainActor
+func testDefaultPopoverModeIsOverview() async throws {
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []))
+
+    try expectEqual(viewModel.selectedPopoverMode, .overview, "popover should default to overview mode")
+}
+
+@MainActor
+func testSelectingPopoverModeDoesNotRefreshSpend() async throws {
+    let service = RecordingSpendService(results: [])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    viewModel.selectPopoverMode(.breakdown)
+
+    try expectEqual(viewModel.selectedPopoverMode, .breakdown, "mode selection should update view state")
+    try expectEqual(service.requestedRanges, [], "mode selection should not refresh spend")
+}
+
+func testPopoverModesExposeOverviewTrendsBreakdown() throws {
+    try expectEqual(SpendPopoverMode.allCases, [.overview, .trends, .breakdown], "phase 2 should expose the first advanced modes")
+    try expectEqual(SpendPopoverMode.allCases.map(\.displayName), ["Overview", "Trends", "Breakdown"], "popover modes should have display names")
+}
+
+@MainActor
 func testChangingMetricDoesNotRefreshSpend() async throws {
     let service = RecordingSpendService(results: [])
     let viewModel = SpendDashboardViewModel(spendService: service)
@@ -1720,6 +1955,9 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testPopoverPresentationIncludesPrimaryGauge", testPopoverPresentationIncludesPrimaryGauge),
     ("testPopoverPresentationShowsLimitText", testPopoverPresentationShowsLimitText),
     ("testPopoverPresentationIncludesMetricRows", testPopoverPresentationIncludesMetricRows),
+    ("testOverviewPresentationShowsTokenTotals", testOverviewPresentationShowsTokenTotals),
+    ("testOverviewPresentationShowsRequestTotals", testOverviewPresentationShowsRequestTotals),
+    ("testOverviewPresentationShowsDataSource", testOverviewPresentationShowsDataSource),
     ("testPopoverPresentationShowsOverLimitState", testPopoverPresentationShowsOverLimitState),
     ("testPopoverPresentationPreservesStaleStatus", testPopoverPresentationPreservesStaleStatus),
     ("testGaugePresentationUsesBandColor", testGaugePresentationUsesBandColor),
@@ -1732,6 +1970,18 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testTodayChartDoesNotRenderExclusiveEndDateBar", testTodayChartDoesNotRenderExclusiveEndDateBar),
     ("testDailyChartPresentationSupportsEmptyPoints", testDailyChartPresentationSupportsEmptyPoints),
     ("testDailyChartPresentationScalesThirtyPoints", testDailyChartPresentationScalesThirtyPoints),
+    ("testTrendPresentationIncludesDailySpendAndTokens", testTrendPresentationIncludesDailySpendAndTokens),
+    ("testTrendPresentationScalesLongRanges", testTrendPresentationScalesLongRanges),
+    ("testTrendPresentationBucketsYearToDateScaleInput", testTrendPresentationBucketsYearToDateScaleInput),
+    ("testTrendPresentationHandlesEmptyActivity", testTrendPresentationHandlesEmptyActivity),
+    ("testModelBreakdownSortsBySpendDescending", testModelBreakdownSortsBySpendDescending),
+    ("testModelBreakdownComputesPercentOfTotal", testModelBreakdownComputesPercentOfTotal),
+    ("testModelBreakdownShowsEmptyStateWhenUnavailable", testModelBreakdownShowsEmptyStateWhenUnavailable),
+    ("testModelBreakdownCapsDenseListsWithOther", testModelBreakdownCapsDenseListsWithOther),
+    ("testModelBreakdownZeroTotalRowsHaveZeroShare", testModelBreakdownZeroTotalRowsHaveZeroShare),
+    ("testPreviewFixtureIncludesAdvancedAnalytics", testPreviewFixtureIncludesAdvancedAnalytics),
+    ("testPreviewFixtureIncludesLongModelNames", testPreviewFixtureIncludesLongModelNames),
+    ("testPreviewFixtureIncludesEmptyBreakdownAndFallbackSource", testPreviewFixtureIncludesEmptyBreakdownAndFallbackSource),
     ("testSpendStatusBandThresholds", testSpendStatusBandThresholds),
     ("testRingProgressClampsOverLimitSpend", testRingProgressClampsOverLimitSpend),
     ("testRingPresentationFormatsDollarMetric", testRingPresentationFormatsDollarMetric),
@@ -1744,7 +1994,8 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testMenuBarPreferenceDefaultsToDollars", testMenuBarPreferenceDefaultsToDollars),
     ("testMenuBarPreferencePersistsPercentMetric", testMenuBarPreferencePersistsPercentMetric),
     ("testMenuBarPreferenceFallsBackOnInvalidRawValue", testMenuBarPreferenceFallsBackOnInvalidRawValue),
-    ("testMetricSelectorShowsDollarsAndPercentOptions", testMetricSelectorShowsDollarsAndPercentOptions)
+    ("testMetricSelectorShowsDollarsAndPercentOptions", testMetricSelectorShowsDollarsAndPercentOptions),
+    ("testPopoverModesExposeOverviewTrendsBreakdown", testPopoverModesExposeOverviewTrendsBreakdown)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [
@@ -1793,7 +2044,9 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testStaleFallbackMarksMenuBarAccessibilityStale", testStaleFallbackMarksMenuBarAccessibilityStale),
     ("testChangingMetricDoesNotRefreshSpend", testChangingMetricDoesNotRefreshSpend),
     ("testChangingMetricUpdatesMenuBarPresentation", testChangingMetricUpdatesMenuBarPresentation),
-    ("testMetricAndRangeControlsRemainIndependent", testMetricAndRangeControlsRemainIndependent)
+    ("testMetricAndRangeControlsRemainIndependent", testMetricAndRangeControlsRemainIndependent),
+    ("testDefaultPopoverModeIsOverview", testDefaultPopoverModeIsOverview),
+    ("testSelectingPopoverModeDoesNotRefreshSpend", testSelectingPopoverModeDoesNotRefreshSpend)
 ]
 
 var failures: [String] = []

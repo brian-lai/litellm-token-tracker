@@ -13,6 +13,7 @@ public final class SpendDashboardViewModel {
     public var menuBarSnapshot: SpendSnapshot?
     public var currentAnalyticsSummary: SpendAnalyticsSummary?
     public var userContext: LiteLLMUserContext?
+    public var selectedPopoverMode: SpendPopoverMode = .overview
     public var errorMessage: String?
     public var isRefreshing = false
     public var requiresSetup = false
@@ -83,6 +84,10 @@ public final class SpendDashboardViewModel {
         } catch {
             errorMessage = "Unable to save menu bar preference"
         }
+    }
+
+    public func selectPopoverMode(_ mode: SpendPopoverMode) {
+        selectedPopoverMode = mode
     }
 
     public func apiKeyDidChange() {

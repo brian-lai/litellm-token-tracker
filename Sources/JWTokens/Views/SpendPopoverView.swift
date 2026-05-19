@@ -46,14 +46,22 @@ struct SpendPopoverView: View {
                 }
             }
             detailGrid(rows: presentation.detailRows)
+            modeSelector
             controlPanel
             if let statusText = presentation.statusText {
                 Text(statusText)
                     .font(.caption)
                     .foregroundStyle(viewModel.currentSnapshot?.isStale == true ? .orange : .secondary)
             }
-            if let snapshot = viewModel.currentSnapshot {
-                DailySpendChartView(presentation: .make(points: snapshot.dailyPoints))
+            switch viewModel.selectedPopoverMode {
+            case .overview:
+                if let snapshot = viewModel.currentSnapshot {
+                    DailySpendChartView(presentation: .make(points: snapshot.dailyPoints))
+                }
+            case .trends:
+                TrendView(presentation: .make(analytics: viewModel.currentSnapshot?.analytics))
+            case .breakdown:
+                BreakdownView(presentation: .make(analytics: viewModel.currentSnapshot?.analytics))
             }
             Button {
                 Task {
@@ -83,6 +91,19 @@ struct SpendPopoverView: View {
         VStack(spacing: 8) {
             rangeSelector
             metricSelector
+        }
+    }
+
+    private var modeSelector: some View {
+        HStack(spacing: 6) {
+            ForEach(SpendPopoverMode.allCases) { mode in
+                selectorButton(
+                    title: mode.displayName,
+                    isSelected: viewModel.selectedPopoverMode == mode
+                ) {
+                    viewModel.selectPopoverMode(mode)
+                }
+            }
         }
     }
 

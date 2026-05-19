@@ -1,5 +1,24 @@
 import Foundation
 
+public enum SpendPopoverMode: String, CaseIterable, Identifiable, Sendable {
+    case overview
+    case trends
+    case breakdown
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .overview:
+            return "Overview"
+        case .trends:
+            return "Trends"
+        case .breakdown:
+            return "Breakdown"
+        }
+    }
+}
+
 public struct SpendPopoverPresentation: Equatable, Sendable {
     public struct DetailRow: Equatable, Identifiable, Sendable {
         public let label: String
@@ -31,6 +50,7 @@ public struct SpendPopoverPresentation: Equatable, Sendable {
         let total = snapshot?.totalSpendUSD ?? 0
         let limit = snapshot?.limitUSD ?? 80
         let overLimit = total > limit
+        let analyticsRows = analyticsDetailRows(for: snapshot?.analytics)
         return SpendPopoverPresentation(
             primaryGauge: RingProgressPresentation.make(
                 snapshot: snapshot,
@@ -49,7 +69,7 @@ public struct SpendPopoverPresentation: Equatable, Sendable {
                 DetailRow(label: "Usage", value: MenuBarTitleFormatter.percent(snapshot?.percentOfLimit ?? 0)),
                 DetailRow(label: "Limit", value: MenuBarTitleFormatter.currency(limit)),
                 DetailRow(label: "Updated", value: refreshedText(for: snapshot?.refreshedAt, calendar: calendar).replacingOccurrences(of: "Updated ", with: ""))
-            ],
+            ] + analyticsRows,
             statusText: errorMessage,
             showsKeyUpdateAction: requiresSetup,
             menuBarMetric: menuBarMetric
@@ -66,6 +86,40 @@ public struct SpendPopoverPresentation: Equatable, Sendable {
         formatter.timeZone = calendar.timeZone
         formatter.dateFormat = "h:mm a"
         return "Updated \(formatter.string(from: date))"
+    }
+
+    private static func analyticsDetailRows(for analytics: SpendAnalyticsSummary?) -> [DetailRow] {
+        guard let analytics else {
+            return []
+        }
+
+        return [
+            DetailRow(label: "Tokens", value: integerText(analytics.totals.totalTokens)),
+            DetailRow(
+                label: "Requests",
+                value: "\(integerText(analytics.totals.apiRequests)) (\(integerText(analytics.totals.successfulRequests)) ok, \(integerText(analytics.totals.failedRequests)) fail)"
+            ),
+            DetailRow(label: "Source", value: analytics.source.displayName)
+        ]
+    }
+
+    private static func integerText(_ value: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+}
+
+public extension SpendDataSource {
+    var displayName: String {
+        switch self {
+        case .userDailyActivity:
+            return "Daily activity"
+        case .spendLogsFallback:
+            return "Spend logs fallback"
+        case .staleCache:
+            return "Stale cache"
+        }
     }
 }
 
