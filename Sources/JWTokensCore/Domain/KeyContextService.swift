@@ -26,8 +26,14 @@ public enum KeyContextResult: Equatable, Sendable {
 }
 
 public protocol KeyContextServicing: Sendable {
-    func refresh(userContext: LiteLLMUserContext?, now: Date) async -> KeyContextResult
+    func refresh(userContext: LiteLLMUserContext?, now: Date, bypassingCache: Bool) async -> KeyContextResult
     func clearCache()
+}
+
+public extension KeyContextServicing {
+    func refresh(userContext: LiteLLMUserContext?, now: Date) async -> KeyContextResult {
+        await refresh(userContext: userContext, now: now, bypassingCache: false)
+    }
 }
 
 public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
@@ -52,14 +58,14 @@ public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
         self.cacheTTL = cacheTTL
     }
 
-    public func refresh(userContext: LiteLLMUserContext?, now: Date) async -> KeyContextResult {
+    public func refresh(userContext: LiteLLMUserContext?, now: Date, bypassingCache: Bool = false) async -> KeyContextResult {
         var currentScope: String?
         do {
             let apiKey = try apiKeyStore.readAPIKey()
             let configuration = try configurationStore.loadConfiguration()
             let scope = cacheScope(baseURL: configuration.baseURL, apiKey: apiKey)
             currentScope = scope
-            if let cached = loadFreshCache(now: now, scope: scope) {
+            if !bypassingCache, let cached = loadFreshCache(now: now, scope: scope) {
                 return .refreshed(cached)
             }
             let client = clientFactory(configuration.baseURL, apiKey)

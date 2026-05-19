@@ -163,14 +163,16 @@ final class RecordingKeyContextService: KeyContextServicing, @unchecked Sendable
     var results: [KeyContextResult]
     var requestedUserContexts: [LiteLLMUserContext?] = []
     var requestedDates: [Date] = []
+    var requestedCacheBypassFlags: [Bool] = []
 
     init(results: [KeyContextResult]) {
         self.results = results
     }
 
-    func refresh(userContext: LiteLLMUserContext?, now: Date) async -> KeyContextResult {
+    func refresh(userContext: LiteLLMUserContext?, now: Date, bypassingCache: Bool) async -> KeyContextResult {
         requestedUserContexts.append(userContext)
         requestedDates.append(now)
+        requestedCacheBypassFlags.append(bypassingCache)
         return results.removeFirst()
     }
 
@@ -2162,7 +2164,28 @@ func testManualRefreshInKeysRefreshesKeyContext() async throws {
     await viewModel.refreshSelectedMode(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
 
     try expectEqual(keyService.requestedDates.count, 2, "manual refresh in Keys mode should refresh key context")
+    try expectEqual(keyService.requestedCacheBypassFlags, [false, true], "manual refresh should bypass key context cache")
     try expectEqual(viewModel.keyContextSnapshot?.currentKey?.alias, "Second", "manual refresh should update key context")
+}
+
+func testManualKeyContextRefreshBypassesFreshCache() async throws {
+    let client = RecordingKeyClient(
+        userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        currentKeyResult: .success(keySummary(alias: "First", spend: 1)),
+        userKeysResult: .success([])
+    )
+    let service = KeyContextService(apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")), clientFactory: { _, _ in client })
+    let user = LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)
+
+    _ = await service.refresh(userContext: user, now: try fixedDate("2026-05-18"))
+    client.currentKeyResult = .success(keySummary(alias: "Second", spend: 2))
+    let result = await service.refresh(userContext: user, now: try fixedDate("2026-05-18").addingTimeInterval(60), bypassingCache: true)
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "expected manual key context refresh to succeed")
+    }
+    try expectEqual(client.currentKeyCalls, 2, "manual key context refresh should bypass fresh cache and call LiteLLM")
+    try expectEqual(snapshot.currentKey?.alias, "Second", "manual key context refresh should return fresh key data")
 }
 
 func testKeyContextCacheIsScopedByCredential() async throws {
@@ -2456,6 +2479,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testKeyEndpointsMapUnauthorizedWithoutBreakingSpend", testKeyEndpointsMapUnauthorizedWithoutBreakingSpend),
     ("testKeyContextUsesStaleValueWhenAvailable", testKeyContextUsesStaleValueWhenAvailable),
     ("testKeyContextCacheExpiresAfterFiveMinutes", testKeyContextCacheExpiresAfterFiveMinutes),
+    ("testManualKeyContextRefreshBypassesFreshCache", testManualKeyContextRefreshBypassesFreshCache),
     ("testKeyContextCacheIsScopedByCredential", testKeyContextCacheIsScopedByCredential),
     ("testKeyContextDoesNotReturnStaleAcrossCredentialChangeOnFailure", testKeyContextDoesNotReturnStaleAcrossCredentialChangeOnFailure),
     ("testCachedUserContextIsScopedByCredential", testCachedUserContextIsScopedByCredential),

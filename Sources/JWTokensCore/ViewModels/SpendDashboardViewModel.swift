@@ -77,7 +77,7 @@ public final class SpendDashboardViewModel {
 
     public func refreshSelectedMode(now: Date = Date(), calendar: Calendar = .current) async {
         if selectedPopoverMode == .keys {
-            await refreshKeyContext(now: now)
+            await refreshKeyContext(now: now, bypassingCache: true)
         } else {
             await refresh(now: now, calendar: calendar)
         }
@@ -107,14 +107,14 @@ public final class SpendDashboardViewModel {
         }
     }
 
-    public func refreshKeyContext(now: Date = Date()) async {
+    public func refreshKeyContext(now: Date = Date(), bypassingCache: Bool = false) async {
         guard let keyContextService, !isKeyContextRefreshing else {
             return
         }
         isKeyContextRefreshing = true
         defer { isKeyContextRefreshing = false }
 
-        let result = await keyContextService.refresh(userContext: userContext, now: now)
+        let result = await keyContextService.refresh(userContext: userContext, now: now, bypassingCache: bypassingCache)
         switch result {
         case let .refreshed(snapshot):
             keyContextSnapshot = snapshot
