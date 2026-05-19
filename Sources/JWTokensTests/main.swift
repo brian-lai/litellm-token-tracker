@@ -118,6 +118,8 @@ struct FakeClient: LiteLLMClientProtocol {
     var userResult: Result<LiteLLMUserContext, Error>
     var activityResult: Result<SpendAnalyticsSummary, Error>?
     var rowsResult: Result<[SpendLogSummaryRow], Error>
+    var currentKeyResult: Result<KeySpendSummary, Error> = .success(KeySpendSummary(alias: nil, name: nil, spendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil, lastActiveAt: nil))
+    var userKeysResult: Result<[KeySpendSummary], Error> = .success([])
 
     func fetchCurrentUser() async throws -> LiteLLMUserContext {
         try userResult.get()
@@ -132,6 +134,14 @@ struct FakeClient: LiteLLMClientProtocol {
 
     func fetchSpendRows(range: DateRange, userID: String) async throws -> [SpendLogSummaryRow] {
         try rowsResult.get()
+    }
+
+    func fetchCurrentKey() async throws -> KeySpendSummary {
+        try currentKeyResult.get()
+    }
+
+    func fetchUserKeys(userID: String) async throws -> [KeySpendSummary] {
+        try userKeysResult.get()
     }
 }
 
@@ -534,6 +544,40 @@ func testSpendLogsRequestUsesSummarizeTrueAndExclusiveEndDate() async throws {
     try expectEqual(query["start_date"], "2026-05-18", "start date query should be present")
     try expectEqual(query["end_date"], "2026-05-19", "exclusive end date query should be present")
     try expectEqual(query["summarize"], "true", "summarize query should be true")
+}
+
+func testKeyInfoRequestUsesCurrentKeyByDefault() async throws {
+    let loader = StubURLLoader(data: try fixtureData("key-info.json"))
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+
+    _ = try await client.fetchCurrentKey()
+
+    try expectEqual(loader.requests.first?.url?.path, "/key/info", "key info request path should be correct")
+    try expectEqual(loader.requests.first?.url?.query, nil, "current key info should not require query parameters")
+}
+
+func testKeyListRequestFiltersByUserID() async throws {
+    let loader = StubURLLoader(data: try fixtureData("key-list.json"))
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+
+    _ = try await client.fetchUserKeys(userID: "user-123")
+
+    let components = URLComponents(url: loader.requests.first!.url!, resolvingAgainstBaseURL: false)
+    let query = Dictionary(uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+    try expectEqual(loader.requests.first?.url?.path, "/key/list", "key list request path should be correct")
+    try expectEqual(query["user_id"], "user-123", "key list should filter by user id")
+    try expectEqual(query["size"], "100", "key list should request bounded page size")
+}
+
+func testKeyListRequestDoesNotRequestFullObjects() async throws {
+    let loader = StubURLLoader(data: try fixtureData("key-list.json"))
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+
+    _ = try await client.fetchUserKeys(userID: "user-123")
+
+    let components = URLComponents(url: loader.requests.first!.url!, resolvingAgainstBaseURL: false)
+    let queryNames = Set((components?.queryItems ?? []).map(\.name))
+    try expect(!queryNames.contains("return_full_object"), "key list should not request full key objects")
 }
 
 func testUserDailyActivityRequestUsesInclusiveEndDateAndTimezone() async throws {
@@ -2033,6 +2077,9 @@ let syncTests: [(String, () throws -> Void)] = [
 let asyncTests: [(String, () async throws -> Void)] = [
     ("testUserInfoRequestUsesAuthorizationBearer", testUserInfoRequestUsesAuthorizationBearer),
     ("testSpendLogsRequestUsesSummarizeTrueAndExclusiveEndDate", testSpendLogsRequestUsesSummarizeTrueAndExclusiveEndDate),
+    ("testKeyInfoRequestUsesCurrentKeyByDefault", testKeyInfoRequestUsesCurrentKeyByDefault),
+    ("testKeyListRequestFiltersByUserID", testKeyListRequestFiltersByUserID),
+    ("testKeyListRequestDoesNotRequestFullObjects", testKeyListRequestDoesNotRequestFullObjects),
     ("testUserDailyActivityRequestUsesInclusiveEndDateAndTimezone", testUserDailyActivityRequestUsesInclusiveEndDateAndTimezone),
     ("testMapsUnauthorized", testMapsUnauthorized),
     ("testMapsFullyInvalidJSONToMalformedResponse", testMapsFullyInvalidJSONToMalformedResponse),

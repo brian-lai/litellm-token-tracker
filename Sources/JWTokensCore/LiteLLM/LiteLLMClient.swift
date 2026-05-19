@@ -11,6 +11,8 @@ public protocol LiteLLMClientProtocol: Sendable {
     func fetchCurrentUser() async throws -> LiteLLMUserContext
     func fetchUserDailyActivity(range: DateRange, userID: String) async throws -> SpendAnalyticsSummary
     func fetchSpendRows(range: DateRange, userID: String) async throws -> [SpendLogSummaryRow]
+    func fetchCurrentKey() async throws -> KeySpendSummary
+    func fetchUserKeys(userID: String) async throws -> [KeySpendSummary]
 }
 
 public struct LiteLLMClient: LiteLLMClientProtocol {
@@ -52,6 +54,18 @@ public struct LiteLLMClient: LiteLLMClientProtocol {
         return result.analytics
     }
 
+    public func fetchCurrentKey() async throws -> KeySpendSummary {
+        let request = makeRequest(path: "/key/info")
+        let data = try await perform(request, endpoint: "/key/info").data
+        return try LiteLLMResponseDecoder.decodeCurrentKey(from: data)
+    }
+
+    public func fetchUserKeys(userID: String) async throws -> [KeySpendSummary] {
+        let request = try makeUserKeysRequest(userID: userID)
+        let data = try await perform(request, endpoint: "/key/list").data
+        return try LiteLLMResponseDecoder.decodeUserKeys(from: data)
+    }
+
     public func makeSpendRowsRequest(range: DateRange, userID: String) throws -> URLRequest {
         let formatter = DateFormatter.liteLLMRequestDay(timeZone: range.timeZone)
         var components = URLComponents(url: baseURL.appendingPathComponent("spend/logs"), resolvingAgainstBaseURL: false)
@@ -77,6 +91,18 @@ public struct LiteLLMClient: LiteLLMClientProtocol {
             URLQueryItem(name: "end_date", value: formatter.string(from: inclusiveEndDate)),
             URLQueryItem(name: "timezone", value: String(range.timeZone.liteLLMTimezoneOffsetMinutes(for: range.startDate))),
             URLQueryItem(name: "page_size", value: "1000")
+        ]
+        guard let url = components?.url else {
+            throw LiteLLMClientError.malformedResponse
+        }
+        return makeRequest(url: url)
+    }
+
+    public func makeUserKeysRequest(userID: String) throws -> URLRequest {
+        var components = URLComponents(url: baseURL.appendingPathComponent("key/list"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "user_id", value: userID),
+            URLQueryItem(name: "size", value: "100")
         ]
         guard let url = components?.url else {
             throw LiteLLMClientError.malformedResponse
