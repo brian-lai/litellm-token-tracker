@@ -1444,6 +1444,27 @@ func testModelBreakdownShowsEmptyStateWhenUnavailable() throws {
     try expectEqual(presentation.emptyText, "No model breakdown available", "empty breakdown should be clear")
 }
 
+func testPreviewFixtureIncludesAdvancedAnalytics() throws {
+    let analytics = SpendAnalyticsPreviewFixture.advanced(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expect(analytics.totals.totalTokens > 0, "advanced preview fixture should include token totals")
+    try expect(!(analytics.breakdowns[.models] ?? []).isEmpty, "advanced preview fixture should include model breakdowns")
+}
+
+func testPreviewFixtureIncludesLongModelNames() throws {
+    let analytics = SpendAnalyticsPreviewFixture.longModelNames(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    let longest = (analytics.breakdowns[.models] ?? []).map(\.label).max { $0.count < $1.count } ?? ""
+
+    try expect(longest.count > 40, "long model preview fixture should exercise truncation")
+}
+
+func testPreviewFixtureIncludesEmptyBreakdownAndFallbackSource() throws {
+    let analytics = SpendAnalyticsPreviewFixture.fallbackSource(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(analytics.source, .spendLogsFallback, "fallback preview should expose fallback source")
+    try expectEqual(analytics.breakdowns[.models], nil, "fallback preview should have no model breakdown")
+}
+
 @MainActor
 func testMetricAndRangeControlsRemainIndependent() async throws {
     let today = try snapshot(range: .today, total: 8)
@@ -1912,6 +1933,9 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testModelBreakdownSortsBySpendDescending", testModelBreakdownSortsBySpendDescending),
     ("testModelBreakdownComputesPercentOfTotal", testModelBreakdownComputesPercentOfTotal),
     ("testModelBreakdownShowsEmptyStateWhenUnavailable", testModelBreakdownShowsEmptyStateWhenUnavailable),
+    ("testPreviewFixtureIncludesAdvancedAnalytics", testPreviewFixtureIncludesAdvancedAnalytics),
+    ("testPreviewFixtureIncludesLongModelNames", testPreviewFixtureIncludesLongModelNames),
+    ("testPreviewFixtureIncludesEmptyBreakdownAndFallbackSource", testPreviewFixtureIncludesEmptyBreakdownAndFallbackSource),
     ("testSpendStatusBandThresholds", testSpendStatusBandThresholds),
     ("testRingProgressClampsOverLimitSpend", testRingProgressClampsOverLimitSpend),
     ("testRingPresentationFormatsDollarMetric", testRingPresentationFormatsDollarMetric),

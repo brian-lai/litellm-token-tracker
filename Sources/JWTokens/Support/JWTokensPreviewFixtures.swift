@@ -45,6 +45,8 @@ struct PreviewSpendService: SpendServicing {
         case authError = "auth_error"
         case overLimit = "over_limit"
         case emptyChart = "empty_chart"
+        case longModelNames = "long_model_names"
+        case fallbackSource = "fallback_source"
     }
 
     let state: State
@@ -71,18 +73,26 @@ struct PreviewSpendService: SpendServicing {
                 refreshedAt: now,
                 isStale: false
             ))
+        case .longModelNames:
+            let analytics = SpendAnalyticsPreviewFixture.longModelNames(now: now, calendar: calendar)
+            return .refreshed(snapshot(range: range, total: analytics.totalSpendUSD, now: now, calendar: calendar, analytics: analytics))
+        case .fallbackSource:
+            let analytics = SpendAnalyticsPreviewFixture.fallbackSource(now: now, calendar: calendar)
+            return .refreshed(snapshot(range: range, total: analytics.totalSpendUSD, now: now, calendar: calendar, analytics: analytics))
         }
     }
 
-    private func snapshot(range: SpendRange, total: Decimal, now: Date, calendar: Calendar, isStale: Bool = false) -> SpendSnapshot {
-        SpendSnapshot(
+    private func snapshot(range: SpendRange, total: Decimal, now: Date, calendar: Calendar, isStale: Bool = false, analytics: SpendAnalyticsSummary? = nil) -> SpendSnapshot {
+        let resolvedAnalytics = analytics ?? SpendAnalyticsPreviewFixture.advanced(now: now, calendar: calendar)
+        return SpendSnapshot(
             range: range,
             totalSpendUSD: total,
             limitUSD: 80,
             percentOfLimit: total / 80,
-            dailyPoints: [DailySpendPoint(date: calendar.startOfDay(for: now), spendUSD: total)],
+            dailyPoints: resolvedAnalytics.dailyPoints.map(\.spendPoint),
             refreshedAt: now,
-            isStale: isStale
+            isStale: isStale,
+            analytics: resolvedAnalytics
         )
     }
 }

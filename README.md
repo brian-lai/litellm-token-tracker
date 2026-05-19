@@ -58,12 +58,21 @@ swift run JWTokens -- --preview-state stale
 swift run JWTokens -- --preview-state auth_error
 swift run JWTokens -- --preview-state over_limit
 swift run JWTokens -- --preview-state empty_chart
+swift run JWTokens -- --preview-state long_model_names
+swift run JWTokens -- --preview-state fallback_source
 swift run JWTokens -- --preview-state normal --preview-metric percent
 ```
 
 Checklist: status item ring and label are visible, the popover opens, the accessibility label describes spend and band, and switching dollars/percent does not clip or jitter.
 
-The popover uses a compact dark layout inspired by iStat Menus: a primary spend gauge, selected-range summary, range selector, menu bar metric selector, daily chart, refresh control, and setup/error states. Use the preview states above to check normal, setup, stale, auth error, over-limit, and empty chart layouts without live API calls.
+The popover uses a compact dark layout inspired by iStat Menus: a primary spend gauge, selected-range summary, mode selector, range selector, menu bar metric selector, trend details, model breakdown, refresh control, and setup/error states. Use the preview states above to check normal, setup, stale, auth error, over-limit, empty chart, fallback source, and long model label layouts without live API calls.
+
+Advanced popover checklist:
+
+- Overview shows spend, limit, tokens, requests, source, and refresh status without wrapping values.
+- Trends renders daily bars with token/request summaries for populated and empty states.
+- Breakdown ranks model spend, truncates long model labels, and shows a clear empty state when fallback data lacks model details.
+- Narrow popover sizing remains stable; controls should not resize when switching Overview, Trends, and Breakdown.
 
 ## Phase 1 Smoke Test
 
