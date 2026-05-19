@@ -2125,6 +2125,50 @@ func testKeyContextCacheExpiresAfterFiveMinutes() async throws {
     try expectEqual(client.currentKeyCalls, 2, "key context should cache for five minutes then refresh")
 }
 
+func testKeysModeShowsCurrentKeyAlias() throws {
+    let snapshot = KeyContextSnapshot(currentKey: keySummary(alias: "Claude Code", spend: 65), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
+    let presentation = KeyBudgetPresentation.make(snapshot: snapshot, errorMessage: nil, calendar: fixedCalendar())
+
+    try expectEqual(presentation.currentKeyName, "Claude Code", "keys presentation should show current key alias")
+    try expectEqual(presentation.currentKeySpendText, "$65.00", "keys presentation should show current key spend")
+}
+
+func testKeysModeRanksOwnedKeysBySpend() throws {
+    let snapshot = KeyContextSnapshot(
+        currentKey: nil,
+        ownedKeys: [
+            keySummary(alias: "Small", spend: 1),
+            keySummary(alias: "Large", spend: 9)
+        ],
+        refreshedAt: try fixedDate("2026-05-18"),
+        isStale: false
+    )
+    let presentation = KeyBudgetPresentation.make(snapshot: snapshot, errorMessage: nil, calendar: fixedCalendar())
+
+    try expectEqual(presentation.ownedKeys.map(\.name), ["Large", "Small"], "owned keys should rank by spend")
+}
+
+func testKeysModeShowsBudgetResetContext() throws {
+    let reset = try fixedDate("2026-06-01")
+    let snapshot = KeyContextSnapshot(
+        currentKey: KeySpendSummary(alias: "Claude Code", name: nil, spendUSD: 65, maxBudgetUSD: 80, budgetResetAt: reset, lastActiveAt: nil),
+        ownedKeys: [],
+        refreshedAt: try fixedDate("2026-05-18"),
+        isStale: false
+    )
+    let presentation = KeyBudgetPresentation.make(snapshot: snapshot, errorMessage: nil, calendar: fixedCalendar())
+
+    try expectEqual(presentation.currentKeyBudgetText, "$65.00 of $80.00", "keys presentation should show budget spend context")
+    try expect(presentation.currentKeyResetText?.contains("Jun 1") == true, "keys presentation should show budget reset context")
+}
+
+func testKeysModeShowsScopedError() throws {
+    let presentation = KeyBudgetPresentation.make(snapshot: nil, errorMessage: "Unable to load key context", calendar: fixedCalendar())
+
+    try expectEqual(presentation.statusText, "Unable to load key context", "keys presentation should show scoped key error")
+    try expect(presentation.isEmpty, "missing key snapshot should be empty")
+}
+
 func keySummary(alias: String?, spend: Decimal) -> KeySpendSummary {
     KeySpendSummary(alias: alias, name: nil, spendUSD: spend, maxBudgetUSD: 80, budgetResetAt: nil, lastActiveAt: nil)
 }
@@ -2215,6 +2259,10 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testPreviewFixtureIncludesAdvancedAnalytics", testPreviewFixtureIncludesAdvancedAnalytics),
     ("testPreviewFixtureIncludesLongModelNames", testPreviewFixtureIncludesLongModelNames),
     ("testPreviewFixtureIncludesEmptyBreakdownAndFallbackSource", testPreviewFixtureIncludesEmptyBreakdownAndFallbackSource),
+    ("testKeysModeShowsCurrentKeyAlias", testKeysModeShowsCurrentKeyAlias),
+    ("testKeysModeRanksOwnedKeysBySpend", testKeysModeRanksOwnedKeysBySpend),
+    ("testKeysModeShowsBudgetResetContext", testKeysModeShowsBudgetResetContext),
+    ("testKeysModeShowsScopedError", testKeysModeShowsScopedError),
     ("testSpendStatusBandThresholds", testSpendStatusBandThresholds),
     ("testRingProgressClampsOverLimitSpend", testRingProgressClampsOverLimitSpend),
     ("testRingPresentationFormatsDollarMetric", testRingPresentationFormatsDollarMetric),

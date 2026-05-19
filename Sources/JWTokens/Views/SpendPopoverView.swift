@@ -63,7 +63,7 @@ struct SpendPopoverView: View {
             case .breakdown:
                 BreakdownView(presentation: .make(analytics: viewModel.currentSnapshot?.analytics))
             case .keys:
-                EmptyView()
+                KeyBudgetView(presentation: .make(snapshot: viewModel.keyContextSnapshot, errorMessage: viewModel.keyContextErrorMessage))
             }
             Button {
                 Task {

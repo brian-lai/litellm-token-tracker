@@ -46,6 +46,12 @@ final class JWTokensAppDelegate: NSObject, NSApplicationDelegate {
                     LiteLLMClient(baseURL: baseURL, apiKey: apiKey)
                 }
             ),
+            keyContextService: KeyContextService(
+                apiKeyStore: apiKeyStore,
+                clientFactory: { baseURL, apiKey in
+                    LiteLLMClient(baseURL: baseURL, apiKey: apiKey)
+                }
+            ),
             apiKeyStore: apiKeyStore,
             menuBarPreferenceStore: UserDefaultsMenuBarPreferenceStore()
         )
