@@ -159,6 +159,64 @@ final class RecordingSpendService: SpendServicing, @unchecked Sendable {
     }
 }
 
+final class RecordingKeyContextService: KeyContextServicing, @unchecked Sendable {
+    var results: [KeyContextResult]
+    var requestedUserContexts: [LiteLLMUserContext?] = []
+    var requestedDates: [Date] = []
+
+    init(results: [KeyContextResult]) {
+        self.results = results
+    }
+
+    func refresh(userContext: LiteLLMUserContext?, now: Date) async -> KeyContextResult {
+        requestedUserContexts.append(userContext)
+        requestedDates.append(now)
+        return results.removeFirst()
+    }
+}
+
+final class RecordingKeyClient: LiteLLMClientProtocol, @unchecked Sendable {
+    var currentUserCalls = 0
+    var currentKeyCalls = 0
+    var userKeyCalls: [String] = []
+    var userResult: Result<LiteLLMUserContext, Error>
+    var currentKeyResult: Result<KeySpendSummary, Error>
+    var userKeysResult: Result<[KeySpendSummary], Error>
+
+    init(
+        userResult: Result<LiteLLMUserContext, Error>,
+        currentKeyResult: Result<KeySpendSummary, Error>,
+        userKeysResult: Result<[KeySpendSummary], Error>
+    ) {
+        self.userResult = userResult
+        self.currentKeyResult = currentKeyResult
+        self.userKeysResult = userKeysResult
+    }
+
+    func fetchCurrentUser() async throws -> LiteLLMUserContext {
+        currentUserCalls += 1
+        return try userResult.get()
+    }
+
+    func fetchUserDailyActivity(range: DateRange, userID: String) async throws -> SpendAnalyticsSummary {
+        throw LiteLLMClientError.unavailable
+    }
+
+    func fetchSpendRows(range: DateRange, userID: String) async throws -> [SpendLogSummaryRow] {
+        throw LiteLLMClientError.unavailable
+    }
+
+    func fetchCurrentKey() async throws -> KeySpendSummary {
+        currentKeyCalls += 1
+        return try currentKeyResult.get()
+    }
+
+    func fetchUserKeys(userID: String) async throws -> [KeySpendSummary] {
+        userKeyCalls.append(userID)
+        return try userKeysResult.get()
+    }
+}
+
 actor SuspendingSpendService: SpendServicing {
     private var continuation: CheckedContinuation<SpendRefreshResult, Never>?
     private(set) var callCount = 0
@@ -1961,15 +2019,114 @@ func testSelectingPopoverModeDoesNotRefreshSpend() async throws {
     let service = RecordingSpendService(results: [])
     let viewModel = SpendDashboardViewModel(spendService: service)
 
-    viewModel.selectPopoverMode(.breakdown)
+    await viewModel.selectPopoverMode(.breakdown)
 
     try expectEqual(viewModel.selectedPopoverMode, .breakdown, "mode selection should update view state")
     try expectEqual(service.requestedRanges, [], "mode selection should not refresh spend")
 }
 
 func testPopoverModesExposeOverviewTrendsBreakdown() throws {
-    try expectEqual(SpendPopoverMode.allCases, [.overview, .trends, .breakdown], "phase 2 should expose the first advanced modes")
-    try expectEqual(SpendPopoverMode.allCases.map(\.displayName), ["Overview", "Trends", "Breakdown"], "popover modes should have display names")
+    try expectEqual(SpendPopoverMode.allCases, [.overview, .trends, .breakdown, .keys], "popover should expose analytics and key modes")
+    try expectEqual(SpendPopoverMode.allCases.map(\.displayName), ["Overview", "Trends", "Breakdown", "Keys"], "popover modes should have display names")
+}
+
+@MainActor
+func testKeysModeLoadsKeyContextLazily() async throws {
+    let snapshot = KeyContextSnapshot(currentKey: keySummary(alias: "Claude Code", spend: 8), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
+    let keyService = RecordingKeyContextService(results: [.refreshed(snapshot)])
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), keyContextService: keyService)
+
+    try expectEqual(keyService.requestedDates.count, 0, "key context should not load before Keys mode opens")
+    await viewModel.selectPopoverMode(.keys, now: try fixedDate("2026-05-18"))
+
+    try expectEqual(keyService.requestedDates.count, 1, "keys mode should lazily load key context")
+    try expectEqual(viewModel.keyContextSnapshot, snapshot, "view model should store key context")
+}
+
+@MainActor
+func testKeyContextUsesCachedUserIDFromAnalyticsRefresh() async throws {
+    let user = LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)
+    let spendSnapshot = SpendSnapshot(range: .today, totalSpendUSD: 8, limitUSD: 80, percentOfLimit: Decimal(string: "0.1")!, dailyPoints: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false, userContext: user)
+    let keyService = RecordingKeyContextService(results: [.refreshed(KeyContextSnapshot(currentKey: nil, ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false))])
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: [.refreshed(spendSnapshot)]), keyContextService: keyService)
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    await viewModel.selectPopoverMode(.keys, now: try fixedDate("2026-05-18"))
+
+    try expectEqual(keyService.requestedUserContexts.first??.userID, "user-123", "key context should reuse analytics refresh user context")
+}
+
+@MainActor
+func testKeyContextFailurePreservesSpendSnapshot() async throws {
+    let spendSnapshot = try snapshot(range: .today, total: 8)
+    let viewModel = SpendDashboardViewModel(
+        spendService: RecordingSpendService(results: [.refreshed(spendSnapshot)]),
+        keyContextService: RecordingKeyContextService(results: [.failed(message: "Unable to load key context")])
+    )
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    await viewModel.selectPopoverMode(.keys, now: try fixedDate("2026-05-18"))
+
+    try expectEqual(viewModel.currentSnapshot, spendSnapshot, "key context failure should preserve spend snapshot")
+    try expectEqual(viewModel.keyContextErrorMessage, "Unable to load key context", "key context failure should be scoped")
+}
+
+func testKeyEndpointsMapUnauthorizedWithoutBreakingSpend() async throws {
+    let service = KeyContextService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        clientFactory: { _, _ in
+            RecordingKeyClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+                currentKeyResult: .failure(LiteLLMClientError.unauthorized),
+                userKeysResult: .success([])
+            )
+        }
+    )
+
+    let result = await service.refresh(userContext: LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil), now: try fixedDate("2026-05-18"))
+
+    guard case .authFailed = result else {
+        throw TestFailure(description: "unauthorized key endpoint should map to scoped auth failure")
+    }
+}
+
+func testKeyContextUsesStaleValueWhenAvailable() async throws {
+    let stale = KeyContextSnapshot(currentKey: keySummary(alias: "Old", spend: 1), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
+    let client = RecordingKeyClient(
+        userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        currentKeyResult: .success(stale.currentKey!),
+        userKeysResult: .success([])
+    )
+    let service = KeyContextService(apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")), clientFactory: { _, _ in client })
+    _ = await service.refresh(userContext: LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil), now: try fixedDate("2026-05-18"))
+    client.currentKeyResult = .failure(LiteLLMClientError.unavailable)
+
+    let result = await service.refresh(userContext: LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil), now: try fixedDate("2026-05-18").addingTimeInterval(301))
+
+    guard case let .stale(snapshot, _) = result else {
+        throw TestFailure(description: "expected stale key context")
+    }
+    try expect(snapshot.isStale, "stale key context should be marked")
+}
+
+func testKeyContextCacheExpiresAfterFiveMinutes() async throws {
+    let client = RecordingKeyClient(
+        userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        currentKeyResult: .success(keySummary(alias: "Claude Code", spend: 8)),
+        userKeysResult: .success([])
+    )
+    let service = KeyContextService(apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")), clientFactory: { _, _ in client })
+    let user = LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)
+
+    _ = await service.refresh(userContext: user, now: try fixedDate("2026-05-18"))
+    _ = await service.refresh(userContext: user, now: try fixedDate("2026-05-18").addingTimeInterval(299))
+    _ = await service.refresh(userContext: user, now: try fixedDate("2026-05-18").addingTimeInterval(301))
+
+    try expectEqual(client.currentKeyCalls, 2, "key context should cache for five minutes then refresh")
+}
+
+func keySummary(alias: String?, spend: Decimal) -> KeySpendSummary {
+    KeySpendSummary(alias: alias, name: nil, spendUSD: spend, maxBudgetUSD: 80, budgetResetAt: nil, lastActiveAt: nil)
 }
 
 @MainActor
@@ -2086,6 +2243,9 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testRedactsAuthorizationHeaderFromLogs", testRedactsAuthorizationHeaderFromLogs),
     ("testFetchSpendRowsDoesNotComputeSnapshot", testFetchSpendRowsDoesNotComputeSnapshot),
     ("testFetchUserDailyActivityDoesNotLogPayloads", testFetchUserDailyActivityDoesNotLogPayloads),
+    ("testKeyEndpointsMapUnauthorizedWithoutBreakingSpend", testKeyEndpointsMapUnauthorizedWithoutBreakingSpend),
+    ("testKeyContextUsesStaleValueWhenAvailable", testKeyContextUsesStaleValueWhenAvailable),
+    ("testKeyContextCacheExpiresAfterFiveMinutes", testKeyContextCacheExpiresAfterFiveMinutes),
     ("testRefreshFetchesUserThenTodaySpend", testRefreshFetchesUserThenTodaySpend),
     ("testRefreshPrefersDailyActivitySummary", testRefreshPrefersDailyActivitySummary),
     ("testRefreshMarksActivitySource", testRefreshMarksActivitySource),
@@ -2126,6 +2286,9 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testMetricAndRangeControlsRemainIndependent", testMetricAndRangeControlsRemainIndependent),
     ("testDefaultPopoverModeIsOverview", testDefaultPopoverModeIsOverview),
     ("testSelectingPopoverModeDoesNotRefreshSpend", testSelectingPopoverModeDoesNotRefreshSpend)
+    ,("testKeysModeLoadsKeyContextLazily", testKeysModeLoadsKeyContextLazily)
+    ,("testKeyContextUsesCachedUserIDFromAnalyticsRefresh", testKeyContextUsesCachedUserIDFromAnalyticsRefresh)
+    ,("testKeyContextFailurePreservesSpendSnapshot", testKeyContextFailurePreservesSpendSnapshot)
 ]
 
 var failures: [String] = []

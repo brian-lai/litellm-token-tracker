@@ -62,6 +62,8 @@ struct SpendPopoverView: View {
                 TrendView(presentation: .make(analytics: viewModel.currentSnapshot?.analytics))
             case .breakdown:
                 BreakdownView(presentation: .make(analytics: viewModel.currentSnapshot?.analytics))
+            case .keys:
+                EmptyView()
             }
             Button {
                 Task {
@@ -101,7 +103,9 @@ struct SpendPopoverView: View {
                     title: mode.displayName,
                     isSelected: viewModel.selectedPopoverMode == mode
                 ) {
-                    viewModel.selectPopoverMode(mode)
+                    Task {
+                        await viewModel.selectPopoverMode(mode)
+                    }
                 }
             }
         }

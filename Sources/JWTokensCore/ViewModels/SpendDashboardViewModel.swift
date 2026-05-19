@@ -5,6 +5,7 @@ import Observation
 @MainActor
 public final class SpendDashboardViewModel {
     private let spendService: SpendServicing
+    private let keyContextService: KeyContextServicing?
     private let apiKeyStore: APIKeyStoring?
     private let menuBarPreferenceStore: MenuBarPreferenceStoring?
 
@@ -13,6 +14,9 @@ public final class SpendDashboardViewModel {
     public var menuBarSnapshot: SpendSnapshot?
     public var currentAnalyticsSummary: SpendAnalyticsSummary?
     public var userContext: LiteLLMUserContext?
+    public var keyContextSnapshot: KeyContextSnapshot?
+    public var keyContextErrorMessage: String?
+    public var isKeyContextRefreshing = false
     public var selectedPopoverMode: SpendPopoverMode = .overview
     public var errorMessage: String?
     public var isRefreshing = false
@@ -35,10 +39,12 @@ public final class SpendDashboardViewModel {
 
     public init(
         spendService: SpendServicing,
+        keyContextService: KeyContextServicing? = nil,
         apiKeyStore: APIKeyStoring? = nil,
         menuBarPreferenceStore: MenuBarPreferenceStoring? = nil
     ) {
         self.spendService = spendService
+        self.keyContextService = keyContextService
         self.apiKeyStore = apiKeyStore
         self.menuBarPreferenceStore = menuBarPreferenceStore
         self.menuBarMetric = (try? menuBarPreferenceStore?.loadMetric()) ?? .dollars
@@ -86,8 +92,31 @@ public final class SpendDashboardViewModel {
         }
     }
 
-    public func selectPopoverMode(_ mode: SpendPopoverMode) {
+    public func selectPopoverMode(_ mode: SpendPopoverMode, now: Date = Date()) async {
         selectedPopoverMode = mode
+        if mode == .keys, keyContextSnapshot == nil {
+            await refreshKeyContext(now: now)
+        }
+    }
+
+    public func refreshKeyContext(now: Date = Date()) async {
+        guard let keyContextService, !isKeyContextRefreshing else {
+            return
+        }
+        isKeyContextRefreshing = true
+        defer { isKeyContextRefreshing = false }
+
+        let result = await keyContextService.refresh(userContext: userContext, now: now)
+        switch result {
+        case let .refreshed(snapshot):
+            keyContextSnapshot = snapshot
+            keyContextErrorMessage = nil
+        case let .stale(snapshot, message):
+            keyContextSnapshot = snapshot
+            keyContextErrorMessage = message
+        case let .authFailed(message), let .failed(message):
+            keyContextErrorMessage = message
+        }
     }
 
     public func apiKeyDidChange() {
