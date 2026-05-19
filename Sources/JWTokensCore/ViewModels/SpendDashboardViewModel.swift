@@ -133,7 +133,7 @@ public final class SpendDashboardViewModel {
 
     public func saveBaseURL() {
         let trimmedValue = baseURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let baseURL = URL(string: trimmedValue), baseURL.isHTTPURL else {
+        guard let baseURL = URL(string: trimmedValue)?.normalizedForConfiguration else {
             settingsErrorMessage = "Base URL must be a valid HTTP URL"
             return
         }
@@ -148,7 +148,6 @@ public final class SpendDashboardViewModel {
             baseURLDraft = baseURL.absoluteString
             settingsErrorMessage = nil
             apiKeyDidChange()
-            clearSpendSnapshots()
         } catch {
             settingsErrorMessage = "Unable to save settings"
         }
@@ -204,6 +203,7 @@ public final class SpendDashboardViewModel {
     public func apiKeyDidChange() {
         pausesAutomaticRefresh = false
         requiresSetup = false
+        clearSpendSnapshots()
         keyContextSnapshot = nil
         keyContextErrorMessage = nil
         userContext = nil

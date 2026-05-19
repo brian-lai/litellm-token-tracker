@@ -68,7 +68,7 @@ public struct LocalAppConfigurationStore: MutableAppConfigurationStoring {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
             let stored = StoredConfiguration(
-                baseURL: configuration.baseURL.absoluteString,
+                baseURL: configuration.baseURL.normalizedForConfiguration?.absoluteString ?? defaults.baseURL.absoluteString,
                 spendLimitUSD: NSDecimalNumber(decimal: configuration.spendLimitUSD).stringValue
             )
             let data = try JSONEncoder().encode(stored)
@@ -89,10 +89,10 @@ private struct StoredConfiguration: Codable {
     let spendLimitUSD: String?
 
     var validBaseURL: URL? {
-        guard let baseURL, let url = URL(string: baseURL), url.isHTTPURL else {
+        guard let baseURL, let url = URL(string: baseURL), let normalizedURL = url.normalizedForConfiguration else {
             return nil
         }
-        return url
+        return normalizedURL
     }
 
     var validSpendLimit: Decimal? {
@@ -109,5 +109,16 @@ public extension URL {
             return false
         }
         return scheme == "http" || scheme == "https"
+    }
+
+    var normalizedForConfiguration: URL? {
+        guard isHTTPURL, var components = URLComponents(url: self, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.user = nil
+        components.password = nil
+        components.query = nil
+        components.fragment = nil
+        return components.url
     }
 }

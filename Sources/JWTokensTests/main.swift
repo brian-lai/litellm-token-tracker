@@ -891,6 +891,31 @@ func testConfigurationStoreRejectsNonHTTPSchemes() throws {
     try expectEqual(configuration.spendLimitUSD, 40, "valid fields should still load when base URL falls back")
 }
 
+func testConfigurationStoreNormalizesSecretBearingBaseURLOnSave() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    let store = LocalAppConfigurationStore(fileURL: fileURL)
+    let secretURL = URL(string: "https://user:secret-token@litellm.example.internal/v1?api_key=sk-should-not-display#token")!
+
+    try store.saveConfiguration(AppConfiguration(baseURL: secretURL, spendLimitUSD: 80))
+    let rawConfig = try String(contentsOf: fileURL, encoding: .utf8)
+    let configuration = try store.loadConfiguration()
+
+    try expectEqual(configuration.baseURL.absoluteString, "https://litellm.example.internal/v1", "configuration store should normalize secret-bearing base URLs")
+    try expect(!rawConfig.contains("secret-token"), "configuration file should not persist URL userinfo secrets")
+    try expect(!rawConfig.contains("sk-should-not-display"), "configuration file should not persist URL query secrets")
+}
+
+func testConfigurationStoreNormalizesSecretBearingBaseURLOnLoad() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"baseURL":"https://user:secret-token@litellm.example.internal/v1?api_key=sk-should-not-display#token","spendLimitUSD":"80"}"#.utf8).write(to: fileURL)
+    let store = LocalAppConfigurationStore(fileURL: fileURL)
+
+    let configuration = try store.loadConfiguration()
+
+    try expectEqual(configuration.baseURL.absoluteString, "https://litellm.example.internal/v1", "configuration store should normalize existing secret-bearing base URLs")
+}
+
 func testRefreshFetchesUserThenTodaySpend() async throws {
     let cache = InMemorySpendSnapshotCache()
     let service = SpendService(
@@ -1239,6 +1264,36 @@ func testChangingBaseURLClearsSpendSnapshots() async throws {
     try expectEqual(viewModel.currentSnapshot, nil, "base URL changes should clear current spend from the old endpoint")
     try expectEqual(viewModel.menuBarSnapshot, nil, "base URL changes should clear menu bar spend from the old endpoint")
     try expectEqual(viewModel.currentAnalyticsSummary, nil, "base URL changes should clear analytics from the old endpoint")
+}
+
+@MainActor
+func testAPIKeyChangeClearsSpendSnapshots() async throws {
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []))
+    viewModel.currentSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.menuBarSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.currentAnalyticsSummary = analyticsSummary(totalSpendUSD: 40, dailyPoints: [], source: .userDailyActivity)
+
+    viewModel.apiKeyDidChange()
+
+    try expectEqual(viewModel.currentSnapshot, nil, "API key changes should clear current spend from the old credential")
+    try expectEqual(viewModel.menuBarSnapshot, nil, "API key changes should clear menu bar spend from the old credential")
+    try expectEqual(viewModel.currentAnalyticsSummary, nil, "API key changes should clear analytics from the old credential")
+}
+
+@MainActor
+func testClearingAPIKeyClearsSpendSnapshots() async throws {
+    let store = MutableAPIKeyStore()
+    try store.saveAPIKey("secret-token")
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), apiKeyStore: store)
+    viewModel.currentSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.menuBarSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.currentAnalyticsSummary = analyticsSummary(totalSpendUSD: 40, dailyPoints: [], source: .userDailyActivity)
+
+    viewModel.clearAPIKey()
+
+    try expectEqual(viewModel.currentSnapshot, nil, "clearing API key should clear current spend from the old credential")
+    try expectEqual(viewModel.menuBarSnapshot, nil, "clearing API key should clear menu bar spend from the old credential")
+    try expectEqual(viewModel.currentAnalyticsSummary, nil, "clearing API key should clear analytics from the old credential")
 }
 
 func analyticsSummary(totalSpendUSD: Decimal, dailyPoints: [DailySpendPoint], source: SpendDataSource = .userDailyActivity) -> SpendAnalyticsSummary {
@@ -2739,6 +2794,8 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testConfigurationStorePersistsBaseURL", testConfigurationStorePersistsBaseURL),
     ("testConfigurationStoreFallsBackOnInvalidValues", testConfigurationStoreFallsBackOnInvalidValues),
     ("testConfigurationStoreRejectsNonHTTPSchemes", testConfigurationStoreRejectsNonHTTPSchemes),
+    ("testConfigurationStoreNormalizesSecretBearingBaseURLOnSave", testConfigurationStoreNormalizesSecretBearingBaseURLOnSave),
+    ("testConfigurationStoreNormalizesSecretBearingBaseURLOnLoad", testConfigurationStoreNormalizesSecretBearingBaseURLOnLoad),
     ("testDefaultTitleShowsTodaySpendAndLimitPercent", testDefaultTitleShowsTodaySpendAndLimitPercent),
     ("testSetupStateUsesCompactTitle", testSetupStateUsesCompactTitle),
     ("testShowsAllFiveRanges", testShowsAllFiveRanges),
@@ -2841,6 +2898,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testInvalidSpendLimitShowsSettingsError", testInvalidSpendLimitShowsSettingsError),
     ("testInvalidBaseURLShowsSettingsError", testInvalidBaseURLShowsSettingsError),
     ("testChangingBaseURLClearsSpendSnapshots", testChangingBaseURLClearsSpendSnapshots),
+    ("testAPIKeyChangeClearsSpendSnapshots", testAPIKeyChangeClearsSpendSnapshots),
+    ("testClearingAPIKeyClearsSpendSnapshots", testClearingAPIKeyClearsSpendSnapshots),
     ("testSelectingRangeFetchesThatRange", testSelectingRangeFetchesThatRange),
     ("testTransientFailureKeepsStaleSnapshot", testTransientFailureKeepsStaleSnapshot),
     ("testViewModelStoresCurrentAnalyticsSummary", testViewModelStoresCurrentAnalyticsSummary),
