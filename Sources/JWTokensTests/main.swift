@@ -320,6 +320,45 @@ func testSpendDataSourceCasesAreStable() throws {
     try expectEqual(SpendDataSource.staleCache.rawValue, "staleCache", "stale source raw value should be stable")
 }
 
+func testDecodesUserDailyActivityUsageTotals() throws {
+    let result = try LiteLLMResponseDecoder.decodeUserDailyActivity(
+        from: fixtureData("user-daily-activity-breakdown.json"),
+        calendar: fixedCalendar()
+    )
+
+    try expectEqual(result.analytics.totalSpendUSD, Decimal(string: "12.5")!, "analytics total spend should decode from metadata")
+    try expectEqual(result.analytics.totals.totalTokens, 3000, "metadata total tokens should decode")
+    try expectEqual(result.analytics.totals.promptTokens, 1200, "metadata prompt tokens should decode")
+    try expectEqual(result.analytics.totals.completionTokens, 1800, "metadata completion tokens should decode")
+    try expectEqual(result.analytics.totals.apiRequests, 3, "metadata request count should decode")
+    try expectEqual(result.analytics.totals.failedRequests, 1, "metadata failed request count should decode")
+    try expectEqual(result.analytics.dailyPoints.first?.totals.totalTokens, 2000, "daily point token totals should decode")
+}
+
+func testDecodesUserDailyActivityModelBreakdown() throws {
+    let result = try LiteLLMResponseDecoder.decodeUserDailyActivity(
+        from: fixtureData("user-daily-activity-breakdown.json"),
+        calendar: fixedCalendar()
+    )
+    let models = result.analytics.breakdowns[.models] ?? []
+
+    try expectEqual(models.count, 2, "valid model breakdown items should decode")
+    try expectEqual(models.first { $0.label == "claude-sonnet" }?.spendUSD, Decimal(string: "10.5")!, "same model spend should aggregate across days")
+    try expectEqual(models.first { $0.label == "claude-sonnet" }?.tokens, 2500, "same model tokens should aggregate across days")
+    try expectEqual(models.first { $0.label == "claude-sonnet" }?.requests, 2, "same model request counts should aggregate across days")
+    try expectEqual(models.first { $0.label == "gpt-4.1" }?.spendUSD, 2, "nested metrics breakdown values should decode")
+}
+
+func testSkipsMalformedBreakdownItems() throws {
+    let result = try LiteLLMResponseDecoder.decodeUserDailyActivity(
+        from: fixtureData("user-daily-activity-breakdown.json"),
+        calendar: fixedCalendar()
+    )
+    let labels = Set((result.analytics.breakdowns[.models] ?? []).map(\.label))
+
+    try expect(!labels.contains("bad_model"), "malformed breakdown values should be skipped")
+}
+
 func fixedCalendar() -> Calendar {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -1480,6 +1519,9 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testAnalyticsSummaryStoresUsageTotals", testAnalyticsSummaryStoresUsageTotals),
     ("testAnalyticsSummaryStoresBreakdownItemsWithoutPresentationPercents", testAnalyticsSummaryStoresBreakdownItemsWithoutPresentationPercents),
     ("testSpendDataSourceCasesAreStable", testSpendDataSourceCasesAreStable),
+    ("testDecodesUserDailyActivityUsageTotals", testDecodesUserDailyActivityUsageTotals),
+    ("testDecodesUserDailyActivityModelBreakdown", testDecodesUserDailyActivityModelBreakdown),
+    ("testSkipsMalformedBreakdownItems", testSkipsMalformedBreakdownItems),
     ("testDecodesSummarizedSpendRowsInRequestedTimezone", testDecodesSummarizedSpendRowsInRequestedTimezone),
     ("testTodayUsesTomorrowAsExclusiveEnd", testTodayUsesTomorrowAsExclusiveEnd),
     ("testLast7DaysIncludesTodayAndSixPriorDays", testLast7DaysIncludesTodayAndSixPriorDays),
