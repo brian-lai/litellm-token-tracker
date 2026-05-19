@@ -66,11 +66,22 @@ struct FakeAPIKeyStore: APIKeyStoring {
     func deleteAPIKey() throws {}
 }
 
+struct FakeEnvironmentProvider: EnvironmentValueProviding {
+    let values: [String: String]
+
+    func value(for key: String) -> String? {
+        values[key]
+    }
+}
+
 final class MutableAPIKeyStore: APIKeyStoring, @unchecked Sendable {
     var savedKeys: [String] = []
 
     func readAPIKey() throws -> String {
-        savedKeys.last ?? ""
+        guard let key = savedKeys.last, !key.isEmpty else {
+            throw APIKeyStoreError.missingKey
+        }
+        return key
     }
 
     func saveAPIKey(_ apiKey: String) throws {
@@ -853,6 +864,52 @@ func testLocalFileAPIKeyStoreUsesPrivatePermissions() throws {
     let filePermissions = try permissions(at: fileURL)
     try expectEqual(directoryPermissions, 0o700, "credential directory should be private")
     try expectEqual(filePermissions, 0o600, "credential file should be private")
+}
+
+func testEnvironmentFallbackUsesPersistedKeyFirst() throws {
+    let store = EnvironmentFallbackAPIKeyStore(
+        primary: MutableAPIKeyStore(),
+        environment: FakeEnvironmentProvider(values: ["LITELLM_API_KEY": "env-token"])
+    )
+    try store.saveAPIKey("persisted-token")
+
+    try expectEqual(try store.readAPIKey(), "persisted-token", "environment fallback should prefer persisted key")
+}
+
+func testEnvironmentFallbackPersistsEnvKeyWhenPrimaryMissing() throws {
+    let primary = MutableAPIKeyStore()
+    let store = EnvironmentFallbackAPIKeyStore(
+        primary: primary,
+        environment: FakeEnvironmentProvider(values: ["LITELLM_API_KEY": "env-token"])
+    )
+
+    try expectEqual(try store.readAPIKey(), "env-token", "environment fallback should return env key when primary is missing")
+    try expectEqual(primary.savedKeys, ["env-token"], "environment fallback should persist env key into primary store")
+}
+
+func testEnvironmentFallbackMissingEnvStaysMissing() throws {
+    let store = EnvironmentFallbackAPIKeyStore(
+        primary: MutableAPIKeyStore(),
+        environment: FakeEnvironmentProvider(values: [:])
+    )
+
+    do {
+        _ = try store.readAPIKey()
+        throw TestFailure(description: "missing primary and missing env should still be missing")
+    } catch APIKeyStoreError.missingKey {
+        return
+    }
+}
+
+func testEnvironmentFallbackTrimsEnvValue() throws {
+    let primary = MutableAPIKeyStore()
+    let store = EnvironmentFallbackAPIKeyStore(
+        primary: primary,
+        environment: FakeEnvironmentProvider(values: ["LITELLM_API_KEY": "  env-token \n"])
+    )
+
+    try expectEqual(try store.readAPIKey(), "env-token", "environment fallback should trim env values before returning them")
+    try expectEqual(primary.savedKeys, ["env-token"], "environment fallback should persist trimmed env values")
 }
 
 func temporaryAPIKeyFileURL() -> URL {
@@ -2939,6 +2996,10 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testLocalFileAPIKeyStoreSaveReadDelete", testLocalFileAPIKeyStoreSaveReadDelete),
     ("testLocalFileAPIKeyStoreMissingFileMapsToMissingKey", testLocalFileAPIKeyStoreMissingFileMapsToMissingKey),
     ("testLocalFileAPIKeyStoreUsesPrivatePermissions", testLocalFileAPIKeyStoreUsesPrivatePermissions),
+    ("testEnvironmentFallbackUsesPersistedKeyFirst", testEnvironmentFallbackUsesPersistedKeyFirst),
+    ("testEnvironmentFallbackPersistsEnvKeyWhenPrimaryMissing", testEnvironmentFallbackPersistsEnvKeyWhenPrimaryMissing),
+    ("testEnvironmentFallbackMissingEnvStaysMissing", testEnvironmentFallbackMissingEnvStaysMissing),
+    ("testEnvironmentFallbackTrimsEnvValue", testEnvironmentFallbackTrimsEnvValue),
     ("testDoesNotExposeKeyInErrorDescription", testDoesNotExposeKeyInErrorDescription),
     ("testConfigurationStorePersistsSpendLimit", testConfigurationStorePersistsSpendLimit),
     ("testConfigurationStorePersistsBaseURL", testConfigurationStorePersistsBaseURL),

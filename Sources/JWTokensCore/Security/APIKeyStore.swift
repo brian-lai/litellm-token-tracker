@@ -25,6 +25,18 @@ public protocol APIKeyStoring: Sendable {
     func deleteAPIKey() throws
 }
 
+public protocol EnvironmentValueProviding: Sendable {
+    func value(for key: String) -> String?
+}
+
+public struct ProcessEnvironmentProvider: EnvironmentValueProviding {
+    public init() {}
+
+    public func value(for key: String) -> String? {
+        ProcessInfo.processInfo.environment[key]
+    }
+}
+
 public struct KeychainAPIKeyStore: APIKeyStoring {
     public let service: String
     public let account: String
@@ -105,5 +117,43 @@ public struct LocalFileAPIKeyStore: APIKeyStoring {
         } catch {
             throw APIKeyStoreError.unavailable
         }
+    }
+}
+
+public struct EnvironmentFallbackAPIKeyStore: APIKeyStoring {
+    public let primary: APIKeyStoring
+    public let environment: EnvironmentValueProviding
+    public let environmentKey: String
+
+    public init(
+        primary: APIKeyStoring,
+        environment: EnvironmentValueProviding = ProcessEnvironmentProvider(),
+        environmentKey: String = "LITELLM_API_KEY"
+    ) {
+        self.primary = primary
+        self.environment = environment
+        self.environmentKey = environmentKey
+    }
+
+    public func readAPIKey() throws -> String {
+        do {
+            return try primary.readAPIKey()
+        } catch APIKeyStoreError.missingKey {
+            guard let envValue = environment.value(for: environmentKey)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !envValue.isEmpty else {
+                throw APIKeyStoreError.missingKey
+            }
+            try primary.saveAPIKey(envValue)
+            return envValue
+        }
+    }
+
+    public func saveAPIKey(_ apiKey: String) throws {
+        try primary.saveAPIKey(apiKey)
+    }
+
+    public func deleteAPIKey() throws {
+        try primary.deleteAPIKey()
     }
 }
