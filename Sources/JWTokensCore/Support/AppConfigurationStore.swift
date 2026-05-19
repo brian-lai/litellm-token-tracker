@@ -89,7 +89,7 @@ private struct StoredConfiguration: Codable {
     let spendLimitUSD: String?
 
     var validBaseURL: URL? {
-        guard let baseURL, let url = URL(string: baseURL), url.scheme?.hasPrefix("http") == true, url.host != nil else {
+        guard let baseURL, let url = URL(string: baseURL), url.isHTTPURL else {
             return nil
         }
         return url
@@ -100,5 +100,14 @@ private struct StoredConfiguration: Codable {
             return nil
         }
         return value
+    }
+}
+
+public extension URL {
+    var isHTTPURL: Bool {
+        guard let scheme = scheme?.lowercased(), host != nil else {
+            return false
+        }
+        return scheme == "http" || scheme == "https"
     }
 }

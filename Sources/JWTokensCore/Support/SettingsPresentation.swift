@@ -58,7 +58,7 @@ public struct DiagnosticSummary: Equatable, Sendable {
         var rows = [
             Row(label: "Credential", value: credentialSource),
             Row(label: "Credential path", value: includeCredentialPath ? "Configured locally" : "Hidden by default"),
-            Row(label: "Endpoint", value: redacted(baseURLText.isEmpty ? AppConfiguration().baseURL.absoluteString : baseURLText)),
+            Row(label: "Endpoint", value: redactedEndpoint(baseURLText.isEmpty ? AppConfiguration().baseURL.absoluteString : baseURLText)),
             Row(label: "Source", value: snapshot?.analytics?.source.displayName ?? "Not refreshed")
         ]
         if let userID = snapshot?.userContext?.userID, !userID.isEmpty {
@@ -83,5 +83,16 @@ public struct DiagnosticSummary: Equatable, Sendable {
             options: .regularExpression
         )
         return redactedValue
+    }
+
+    private static func redactedEndpoint(_ value: String) -> String {
+        guard let url = URL(string: value), var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return redacted(value)
+        }
+        components.user = nil
+        components.password = nil
+        components.query = nil
+        components.fragment = nil
+        return redacted(components.string ?? value)
     }
 }

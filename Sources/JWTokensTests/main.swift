@@ -878,6 +878,19 @@ func testConfigurationStoreFallsBackOnInvalidValues() throws {
     try expectEqual(configuration, defaults, "invalid configuration values should fall back to defaults")
 }
 
+func testConfigurationStoreRejectsNonHTTPSchemes() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"baseURL":"httpx://litellm.example.internal","spendLimitUSD":"40"}"#.utf8).write(to: fileURL)
+    let defaults = AppConfiguration(baseURL: URL(string: "https://litellm.justworksai.net")!, spendLimitUSD: 80)
+    let store = LocalAppConfigurationStore(fileURL: fileURL, defaults: defaults)
+
+    let configuration = try store.loadConfiguration()
+
+    try expectEqual(configuration.baseURL, defaults.baseURL, "configuration store should reject non-http URL schemes")
+    try expectEqual(configuration.spendLimitUSD, 40, "valid fields should still load when base URL falls back")
+}
+
 func testRefreshFetchesUserThenTodaySpend() async throws {
     let cache = InMemorySpendSnapshotCache()
     let service = SpendService(
@@ -1198,6 +1211,34 @@ func testInvalidSpendLimitShowsSettingsError() async throws {
 
     try expectEqual(service.requestedRanges, [], "invalid spend limit should not refresh spend")
     try expectEqual(viewModel.settingsErrorMessage, "Spend limit must be a positive dollar amount", "invalid spend limit should show a scoped settings error")
+}
+
+@MainActor
+func testInvalidBaseURLShowsSettingsError() async throws {
+    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), configurationStore: configurationStore)
+    viewModel.baseURLDraft = "httpx://litellm.example.internal"
+
+    viewModel.saveBaseURL()
+
+    try expectEqual(viewModel.settingsErrorMessage, "Base URL must be a valid HTTP URL", "invalid base URL should show a scoped settings error")
+}
+
+@MainActor
+func testChangingBaseURLClearsSpendSnapshots() async throws {
+    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.justworksai.net")!, spendLimitUSD: 80))
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), configurationStore: configurationStore)
+    viewModel.currentSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.menuBarSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.currentAnalyticsSummary = analyticsSummary(totalSpendUSD: 40, dailyPoints: [], source: .userDailyActivity)
+    viewModel.baseURLDraft = "https://litellm.example.internal"
+
+    viewModel.saveBaseURL()
+
+    try expectEqual(viewModel.currentSnapshot, nil, "base URL changes should clear current spend from the old endpoint")
+    try expectEqual(viewModel.menuBarSnapshot, nil, "base URL changes should clear menu bar spend from the old endpoint")
+    try expectEqual(viewModel.currentAnalyticsSummary, nil, "base URL changes should clear analytics from the old endpoint")
 }
 
 func analyticsSummary(totalSpendUSD: Decimal, dailyPoints: [DailySpendPoint], source: SpendDataSource = .userDailyActivity) -> SpendAnalyticsSummary {
@@ -2528,6 +2569,19 @@ func testDiagnosticSummaryRedactsAPIKey() throws {
     try expect(!rendered.contains("sk-should-not-display"), "diagnostic summary should redact raw LiteLLM key-like values")
 }
 
+func testDiagnosticSummaryRedactsEndpointSecrets() throws {
+    let summary = DiagnosticSummary.make(
+        baseURLText: "https://user:secret-token@litellm.example.internal/v1?token=abc123&api_key=sk-should-not-display#sk-fragment",
+        snapshot: nil
+    )
+    let rows = Dictionary(uniqueKeysWithValues: summary.rows.map { ($0.label, $0.value) })
+    let endpoint = rows["Endpoint"] ?? ""
+
+    try expectEqual(endpoint, "https://litellm.example.internal/v1", "diagnostic endpoint should remove userinfo, query, and fragment")
+    try expect(!String(describing: summary).contains("secret-token"), "diagnostic endpoint should not expose userinfo secrets")
+    try expect(!String(describing: summary).contains("sk-should-not-display"), "diagnostic endpoint should not expose query secrets")
+}
+
 func testDiagnosticSummaryDoesNotIncludeCredentialPathByDefault() throws {
     let summary = DiagnosticSummary.make(baseURLText: "https://litellm.justworksai.net", snapshot: nil)
     let rows = Dictionary(uniqueKeysWithValues: summary.rows.map { ($0.label, $0.value) })
@@ -2684,6 +2738,7 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testConfigurationStorePersistsSpendLimit", testConfigurationStorePersistsSpendLimit),
     ("testConfigurationStorePersistsBaseURL", testConfigurationStorePersistsBaseURL),
     ("testConfigurationStoreFallsBackOnInvalidValues", testConfigurationStoreFallsBackOnInvalidValues),
+    ("testConfigurationStoreRejectsNonHTTPSchemes", testConfigurationStoreRejectsNonHTTPSchemes),
     ("testDefaultTitleShowsTodaySpendAndLimitPercent", testDefaultTitleShowsTodaySpendAndLimitPercent),
     ("testSetupStateUsesCompactTitle", testSetupStateUsesCompactTitle),
     ("testShowsAllFiveRanges", testShowsAllFiveRanges),
@@ -2728,6 +2783,7 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testSettingsModeShowsBaseURL", testSettingsModeShowsBaseURL),
     ("testSettingsModeDocumentsLocalFileStoreRisk", testSettingsModeDocumentsLocalFileStoreRisk),
     ("testDiagnosticSummaryRedactsAPIKey", testDiagnosticSummaryRedactsAPIKey),
+    ("testDiagnosticSummaryRedactsEndpointSecrets", testDiagnosticSummaryRedactsEndpointSecrets),
     ("testDiagnosticSummaryDoesNotIncludeCredentialPathByDefault", testDiagnosticSummaryDoesNotIncludeCredentialPathByDefault),
     ("testDiagnosticSummaryIncludesEndpointSourceAndUserID", testDiagnosticSummaryIncludesEndpointSourceAndUserID),
     ("testDiagnosticSummaryIncludesLastError", testDiagnosticSummaryIncludesLastError),
@@ -2783,6 +2839,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testInitialRefreshLoadsTodaySnapshot", testInitialRefreshLoadsTodaySnapshot),
     ("testChangingSpendLimitRefreshesPresentationWithoutNetwork", testChangingSpendLimitRefreshesPresentationWithoutNetwork),
     ("testInvalidSpendLimitShowsSettingsError", testInvalidSpendLimitShowsSettingsError),
+    ("testInvalidBaseURLShowsSettingsError", testInvalidBaseURLShowsSettingsError),
+    ("testChangingBaseURLClearsSpendSnapshots", testChangingBaseURLClearsSpendSnapshots),
     ("testSelectingRangeFetchesThatRange", testSelectingRangeFetchesThatRange),
     ("testTransientFailureKeepsStaleSnapshot", testTransientFailureKeepsStaleSnapshot),
     ("testViewModelStoresCurrentAnalyticsSummary", testViewModelStoresCurrentAnalyticsSummary),
