@@ -53,8 +53,15 @@ struct SpendPopoverView: View {
                     .font(.caption)
                     .foregroundStyle(viewModel.currentSnapshot?.isStale == true ? .orange : .secondary)
             }
-            if let snapshot = viewModel.currentSnapshot {
-                DailySpendChartView(presentation: .make(points: snapshot.dailyPoints))
+            switch viewModel.selectedPopoverMode {
+            case .overview:
+                if let snapshot = viewModel.currentSnapshot {
+                    DailySpendChartView(presentation: .make(points: snapshot.dailyPoints))
+                }
+            case .trends:
+                TrendView(presentation: .make(analytics: viewModel.currentAnalyticsSummary))
+            case .breakdown:
+                EmptyView()
             }
             Button {
                 Task {

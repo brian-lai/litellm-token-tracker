@@ -1353,6 +1353,52 @@ func testDailyChartPresentationScalesThirtyPoints() throws {
     try expect(presentation.accessibilityLabel.contains("30 days"), "chart accessibility should include day count")
 }
 
+func testTrendPresentationIncludesDailySpendAndTokens() throws {
+    let analytics = SpendAnalyticsSummary(
+        totalSpendUSD: 12,
+        totals: SpendUsageTotals(totalTokens: 300, promptTokens: 100, completionTokens: 200, cacheCreationTokens: 0, cacheReadTokens: 0, apiRequests: 3, successfulRequests: 3, failedRequests: 0),
+        dailyPoints: [
+            DailyActivityPoint(
+                date: try fixedDate("2026-05-18"),
+                spendUSD: 12,
+                totals: SpendUsageTotals(totalTokens: 300, promptTokens: 100, completionTokens: 200, cacheCreationTokens: 0, cacheReadTokens: 0, apiRequests: 3, successfulRequests: 3, failedRequests: 0)
+            )
+        ],
+        breakdowns: [:],
+        source: .userDailyActivity
+    )
+
+    let presentation = TrendPresentation.make(analytics: analytics, calendar: fixedCalendar())
+
+    try expectEqual(presentation.totalText, "$12.00", "trend presentation should show range total")
+    try expectEqual(presentation.tokenSummary, "300 tokens", "trend presentation should show token summary")
+    try expectEqual(presentation.requestSummary, "3 requests", "trend presentation should show request summary")
+    try expectEqual(presentation.days.first?.amountText, "$12.00", "daily trend should show spend")
+    try expectEqual(presentation.days.first?.tokenText, "300 tokens", "daily trend should show daily tokens")
+}
+
+func testTrendPresentationScalesLongRanges() throws {
+    let points = try (0..<30).map { index in
+        DailyActivityPoint(date: try fixedDate("2026-05-01").addingTimeInterval(TimeInterval(index * 86400)), spendUSD: Decimal(index + 1), totals: .zero)
+    }
+    let analytics = SpendAnalyticsSummary(totalSpendUSD: 465, totals: .zero, dailyPoints: points, breakdowns: [:], source: .userDailyActivity)
+
+    let presentation = TrendPresentation.make(analytics: analytics, calendar: fixedCalendar())
+
+    try expectEqual(presentation.days.count, 30, "trend presentation should preserve long ranges")
+    try expectEqual(presentation.days.last?.heightRatio, 1, "largest day should scale to full height")
+    try expect(presentation.accessibilityLabel.contains("30 days"), "trend accessibility should include range density")
+}
+
+func testTrendPresentationHandlesEmptyActivity() throws {
+    let analytics = SpendAnalyticsSummary(totalSpendUSD: 0, totals: .zero, dailyPoints: [], breakdowns: [:], source: .userDailyActivity)
+    let presentation = TrendPresentation.make(analytics: analytics, calendar: fixedCalendar())
+
+    try expect(presentation.isEmpty, "empty trend presentation should be explicit")
+    try expectEqual(presentation.days.count, 0, "empty trend should have no day rows")
+    try expectEqual(presentation.accessibilityLabel, "Spend trend, no daily activity", "empty trend should have accessible summary")
+}
+
 @MainActor
 func testMetricAndRangeControlsRemainIndependent() async throws {
     let today = try snapshot(range: .today, total: 8)
@@ -1815,6 +1861,9 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testTodayChartDoesNotRenderExclusiveEndDateBar", testTodayChartDoesNotRenderExclusiveEndDateBar),
     ("testDailyChartPresentationSupportsEmptyPoints", testDailyChartPresentationSupportsEmptyPoints),
     ("testDailyChartPresentationScalesThirtyPoints", testDailyChartPresentationScalesThirtyPoints),
+    ("testTrendPresentationIncludesDailySpendAndTokens", testTrendPresentationIncludesDailySpendAndTokens),
+    ("testTrendPresentationScalesLongRanges", testTrendPresentationScalesLongRanges),
+    ("testTrendPresentationHandlesEmptyActivity", testTrendPresentationHandlesEmptyActivity),
     ("testSpendStatusBandThresholds", testSpendStatusBandThresholds),
     ("testRingProgressClampsOverLimitSpend", testRingProgressClampsOverLimitSpend),
     ("testRingPresentationFormatsDollarMetric", testRingPresentationFormatsDollarMetric),
