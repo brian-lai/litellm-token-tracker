@@ -665,6 +665,98 @@ func testShowsSelectedRangeTotalAndPercent() throws {
     try expectEqual(presentation.percentText, "30%", "popover should show selected range percent")
 }
 
+func testPopoverPresentationIncludesPrimaryGauge() throws {
+    let presentation = SpendPopoverPresentation.make(
+        range: .today,
+        snapshot: try snapshot(range: .today, total: 40),
+        errorMessage: nil,
+        requiresSetup: false,
+        calendar: fixedCalendar()
+    )
+
+    try expectEqual(presentation.primaryGauge.progress, 0.5, "popover should include selected range gauge progress")
+    try expectEqual(presentation.primaryGauge.band, .yellow, "popover gauge should use spend band")
+}
+
+func testPopoverPresentationShowsLimitText() throws {
+    let presentation = SpendPopoverPresentation.make(
+        range: .today,
+        snapshot: try snapshot(range: .today, total: 20),
+        errorMessage: nil,
+        requiresSetup: false,
+        calendar: fixedCalendar()
+    )
+
+    try expectEqual(presentation.limitText, "Limit $80.00", "popover should show spend limit")
+    try expectEqual(presentation.overLimitText, nil, "under-limit spend should not show over-limit text")
+}
+
+func testPopoverPresentationShowsOverLimitState() throws {
+    let presentation = SpendPopoverPresentation.make(
+        range: .today,
+        snapshot: try snapshot(range: .today, total: 96),
+        errorMessage: nil,
+        requiresSetup: false,
+        calendar: fixedCalendar()
+    )
+
+    try expectEqual(presentation.primaryGauge.progress, 1, "over-limit gauge should clamp")
+    try expectEqual(presentation.overLimitText, "$16.00 over limit", "popover should show over-limit amount")
+}
+
+func testPopoverPresentationPreservesStaleStatus() throws {
+    let presentation = SpendPopoverPresentation.make(
+        range: .today,
+        snapshot: try snapshot(range: .today, total: 5, isStale: true),
+        errorMessage: "Showing last known spend",
+        requiresSetup: false,
+        calendar: fixedCalendar()
+    )
+
+    try expect(presentation.primaryGauge.accessibilityLabel.contains("stale"), "popover gauge should preserve stale context")
+    try expectEqual(presentation.statusText, "Showing last known spend", "popover should preserve stale message")
+}
+
+func testGaugePresentationUsesBandColor() throws {
+    let presentation = RingProgressPresentation.make(
+        snapshot: try snapshot(range: .today, total: 96),
+        metric: .dollars,
+        rangeName: "Today",
+        requiresSetup: false
+    )
+
+    try expectEqual(presentation.band.id, "red", "gauge should expose band for view color")
+}
+
+func testGaugeAccessibilityLabelIncludesRangeAndSpend() throws {
+    let presentation = RingProgressPresentation.make(
+        snapshot: try snapshot(range: .today, total: 40),
+        metric: .percent,
+        rangeName: "Today",
+        requiresSetup: false
+    )
+
+    try expect(presentation.accessibilityLabel.contains("Today"), "gauge accessibility should include range")
+    try expect(presentation.accessibilityLabel.contains("50%"), "gauge accessibility should include spend percent")
+}
+
+func testPopoverFixtureUsesGaugeFirstLayout() throws {
+    let presentation = SpendPopoverPresentation.make(
+        range: .today,
+        snapshot: try snapshot(range: .today, total: 33),
+        errorMessage: nil,
+        requiresSetup: false,
+        calendar: fixedCalendar()
+    )
+
+    try expectEqual(presentation.primaryGauge.label, "$33", "popover presentation should provide gauge-first label")
+}
+
+func testPopoverFixtureKeepsAllPrimaryControls() throws {
+    try expectEqual(SpendRange.allCases.count, 5, "popover should keep all range controls")
+    try expectEqual(MenuBarMetric.allCases.count, 2, "popover should keep metric controls")
+}
+
 func testStaleSnapshotShowsTimestamp() throws {
     let presentation = SpendPopoverPresentation.make(
         range: .today,
@@ -717,6 +809,41 @@ func testTodayChartDoesNotRenderExclusiveEndDateBar() throws {
     let presentation = DailySpendChartPresentation.make(points: snapshot.dailyPoints)
 
     try expectEqual(presentation.bars.count, 1, "chart should not render the exclusive end date row")
+}
+
+func testDailyChartPresentationSupportsEmptyPoints() throws {
+    let presentation = DailySpendChartPresentation.make(points: [])
+
+    try expect(presentation.isEmpty, "empty chart presentation should be explicit")
+    try expectEqual(presentation.bars.count, 0, "empty chart should have no bars")
+    try expectEqual(presentation.accessibilityLabel, "Daily spend chart, no daily spend", "empty chart should have accessible summary")
+}
+
+func testDailyChartPresentationScalesThirtyPoints() throws {
+    let points = try (0..<30).map { index in
+        DailySpendPoint(date: try fixedDate("2026-05-01").addingTimeInterval(TimeInterval(index * 86400)), spendUSD: Decimal(index + 1))
+    }
+    let presentation = DailySpendChartPresentation.make(points: points)
+
+    try expectEqual(presentation.bars.count, 30, "chart should support thirty daily points")
+    try expectEqual(presentation.bars.last?.heightRatio, 1, "largest point should scale to full height")
+    try expect(presentation.accessibilityLabel.contains("30 days"), "chart accessibility should include day count")
+}
+
+@MainActor
+func testMetricAndRangeControlsRemainIndependent() async throws {
+    let today = try snapshot(range: .today, total: 8)
+    let last30 = try snapshot(range: .last30Days, total: 30)
+    let service = RecordingSpendService(results: [.refreshed(today), .refreshed(last30)])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    viewModel.setMenuBarMetric(.percent)
+    await viewModel.selectRange(.last30Days, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(viewModel.menuBarMetric, .percent, "metric control should remain independent")
+    try expectEqual(viewModel.currentSnapshot, last30, "range control should update selected snapshot")
+    try expectEqual(viewModel.menuBarSnapshot, today, "range control should not replace menu bar snapshot")
 }
 
 @MainActor
@@ -1112,10 +1239,20 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testSetupStateUsesCompactTitle", testSetupStateUsesCompactTitle),
     ("testShowsAllFiveRanges", testShowsAllFiveRanges),
     ("testShowsSelectedRangeTotalAndPercent", testShowsSelectedRangeTotalAndPercent),
+    ("testPopoverPresentationIncludesPrimaryGauge", testPopoverPresentationIncludesPrimaryGauge),
+    ("testPopoverPresentationShowsLimitText", testPopoverPresentationShowsLimitText),
+    ("testPopoverPresentationShowsOverLimitState", testPopoverPresentationShowsOverLimitState),
+    ("testPopoverPresentationPreservesStaleStatus", testPopoverPresentationPreservesStaleStatus),
+    ("testGaugePresentationUsesBandColor", testGaugePresentationUsesBandColor),
+    ("testGaugeAccessibilityLabelIncludesRangeAndSpend", testGaugeAccessibilityLabelIncludesRangeAndSpend),
+    ("testPopoverFixtureUsesGaugeFirstLayout", testPopoverFixtureUsesGaugeFirstLayout),
+    ("testPopoverFixtureKeepsAllPrimaryControls", testPopoverFixtureKeepsAllPrimaryControls),
     ("testStaleSnapshotShowsTimestamp", testStaleSnapshotShowsTimestamp),
     ("testAuthErrorShowsKeyUpdateAction", testAuthErrorShowsKeyUpdateAction),
     ("testDailyChartRendersOneBarPerPoint", testDailyChartRendersOneBarPerPoint),
     ("testTodayChartDoesNotRenderExclusiveEndDateBar", testTodayChartDoesNotRenderExclusiveEndDateBar),
+    ("testDailyChartPresentationSupportsEmptyPoints", testDailyChartPresentationSupportsEmptyPoints),
+    ("testDailyChartPresentationScalesThirtyPoints", testDailyChartPresentationScalesThirtyPoints),
     ("testSpendStatusBandThresholds", testSpendStatusBandThresholds),
     ("testRingProgressClampsOverLimitSpend", testRingProgressClampsOverLimitSpend),
     ("testRingPresentationFormatsDollarMetric", testRingPresentationFormatsDollarMetric),
@@ -1165,7 +1302,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testAuthFailurePreservesMenuBarSnapshot", testAuthFailurePreservesMenuBarSnapshot),
     ("testStaleFallbackMarksMenuBarAccessibilityStale", testStaleFallbackMarksMenuBarAccessibilityStale),
     ("testChangingMetricDoesNotRefreshSpend", testChangingMetricDoesNotRefreshSpend),
-    ("testChangingMetricUpdatesMenuBarPresentation", testChangingMetricUpdatesMenuBarPresentation)
+    ("testChangingMetricUpdatesMenuBarPresentation", testChangingMetricUpdatesMenuBarPresentation),
+    ("testMetricAndRangeControlsRemainIndependent", testMetricAndRangeControlsRemainIndependent)
 ]
 
 var failures: [String] = []

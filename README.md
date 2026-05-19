@@ -61,6 +61,8 @@ swift run JWTokens -- --preview-state normal --preview-metric percent
 
 Checklist: status item ring and label are visible, the popover opens, the accessibility label describes spend and band, and switching dollars/percent does not clip or jitter.
 
+The popover uses a compact dark layout inspired by iStat Menus: a primary spend gauge, selected-range summary, range selector, menu bar metric selector, daily chart, refresh control, and setup/error states. Use the preview states above to check normal, setup, stale, auth error, over-limit, and empty chart layouts without live API calls.
+
 ## Phase 1 Smoke Test
 
 The default unit suite does not call the live LiteLLM API:

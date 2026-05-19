@@ -9,6 +9,8 @@ public struct DailySpendChartPresentation: Equatable, Sendable {
     }
 
     public let bars: [Bar]
+    public let isEmpty: Bool
+    public let accessibilityLabel: String
 
     public static func make(points: [DailySpendPoint]) -> DailySpendChartPresentation {
         let maxSpend = points.map(\.spendUSD).max() ?? 0
@@ -26,6 +28,10 @@ public struct DailySpendChartPresentation: Equatable, Sendable {
                 heightRatio: ratio
             )
         }
-        return DailySpendChartPresentation(bars: bars)
+        let total = points.reduce(Decimal(0)) { $0 + $1.spendUSD }
+        let label = bars.isEmpty
+            ? "Daily spend chart, no daily spend"
+            : "Daily spend chart, \(bars.count) days, total \(MenuBarTitleFormatter.currency(total))"
+        return DailySpendChartPresentation(bars: bars, isEmpty: bars.isEmpty, accessibilityLabel: label)
     }
 }

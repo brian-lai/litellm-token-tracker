@@ -1,27 +1,44 @@
 import Foundation
 
 public struct SpendPopoverPresentation: Equatable, Sendable {
+    public let primaryGauge: RingProgressPresentation
     public let rangeName: String
     public let totalText: String
     public let percentText: String
+    public let limitText: String
+    public let overLimitText: String?
     public let refreshedText: String
     public let statusText: String?
     public let showsKeyUpdateAction: Bool
+    public let menuBarMetric: MenuBarMetric
 
     public static func make(
         range: SpendRange,
         snapshot: SpendSnapshot?,
         errorMessage: String?,
         requiresSetup: Bool,
+        menuBarMetric: MenuBarMetric = .dollars,
         calendar: Calendar = .current
     ) -> SpendPopoverPresentation {
-        SpendPopoverPresentation(
+        let total = snapshot?.totalSpendUSD ?? 0
+        let limit = snapshot?.limitUSD ?? 80
+        let overLimit = total > limit
+        return SpendPopoverPresentation(
+            primaryGauge: RingProgressPresentation.make(
+                snapshot: snapshot,
+                metric: .dollars,
+                rangeName: range.longDisplayName,
+                requiresSetup: requiresSetup
+            ),
             rangeName: range.longDisplayName,
-            totalText: MenuBarTitleFormatter.currency(snapshot?.totalSpendUSD ?? 0),
+            totalText: MenuBarTitleFormatter.currency(total),
             percentText: MenuBarTitleFormatter.percent(snapshot?.percentOfLimit ?? 0),
+            limitText: "Limit \(MenuBarTitleFormatter.currency(limit))",
+            overLimitText: overLimit ? "\(MenuBarTitleFormatter.currency(total - limit)) over limit" : nil,
             refreshedText: refreshedText(for: snapshot?.refreshedAt, calendar: calendar),
             statusText: errorMessage,
-            showsKeyUpdateAction: requiresSetup
+            showsKeyUpdateAction: requiresSetup,
+            menuBarMetric: menuBarMetric
         )
     }
 

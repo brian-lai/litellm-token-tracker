@@ -9,27 +9,34 @@ struct SpendPopoverView: View {
             range: viewModel.selectedRange,
             snapshot: viewModel.currentSnapshot,
             errorMessage: viewModel.errorMessage,
-            requiresSetup: viewModel.requiresSetup
+            requiresSetup: viewModel.requiresSetup,
+            menuBarMetric: viewModel.menuBarMetric
         )
 
-        VStack(alignment: .leading, spacing: 12) {
-            rangeSelector
-            metricSelector
-            VStack(alignment: .leading, spacing: 4) {
-                Text(presentation.rangeName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                HStack(alignment: .firstTextBaseline) {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 14) {
+                SpendGaugeView(presentation: presentation.primaryGauge)
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(presentation.rangeName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
                     Text(presentation.totalText)
                         .font(.title2.weight(.semibold))
-                    Text(presentation.percentText)
-                        .font(.headline)
+                        .monospacedDigit()
+                    Text("\(presentation.percentText) of \(presentation.limitText)")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
+                    if let overLimitText = presentation.overLimitText {
+                        Text(overLimitText)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.red)
+                    }
+                    Text(presentation.refreshedText)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
-                Text(presentation.refreshedText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
+            controlPanel
             if let statusText = presentation.statusText {
                 Text(statusText)
                     .font(.caption)
@@ -55,8 +62,18 @@ struct SpendPopoverView: View {
                 .disabled(viewModel.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .frame(width: 280, alignment: .leading)
-        .padding(12)
+        .frame(width: 340, alignment: .leading)
+        .padding(14)
+        .background(.black.opacity(0.84))
+        .foregroundStyle(.white)
+        .preferredColorScheme(.dark)
+    }
+
+    private var controlPanel: some View {
+        VStack(spacing: 8) {
+            rangeSelector
+            metricSelector
+        }
     }
 
     private var rangeSelector: some View {
