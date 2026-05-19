@@ -44,7 +44,7 @@ public struct SpendService: SpendServicing {
             return .authFailed(message: "LiteLLM API key was rejected")
         } catch {
             if let stale = try? cache.loadSnapshot(for: range) {
-                return .stale(stale, message: "Showing last known spend")
+                return .stale(stale.markingStale(), message: "Showing last known spend")
             }
             return .failed(message: "Unable to refresh spend")
         }

@@ -495,6 +495,7 @@ func testReturnsStaleSnapshotOnTransientAPIFailure() async throws {
         throw TestFailure(description: "expected stale result")
     }
     try expectEqual(snapshot.totalSpendUSD, 5, "service should return cached stale spend")
+    try expect(snapshot.isStale, "service should mark cached fallback snapshots stale")
 }
 
 func testAuthFailureReturnsAuthFailedWithoutRetrying() async throws {
@@ -915,6 +916,29 @@ func testAuthFailurePreservesMenuBarSnapshot() async throws {
     try expect(viewModel.pausesAutomaticRefresh, "auth failure should pause automatic refresh")
 }
 
+@MainActor
+func testStaleFallbackMarksMenuBarAccessibilityStale() async throws {
+    let stale = try snapshot(range: .today, total: 5, isStale: false)
+    let cache = InMemorySpendSnapshotCache()
+    try cache.saveSnapshot(stale)
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .failure(LiteLLMClientError.unavailable),
+                rowsResult: .success([])
+            )
+        },
+        cache: cache
+    )
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expect(viewModel.menuBarSnapshot?.isStale == true, "view model should store stale-marked cached fallback")
+    try expect(viewModel.menuBarPresentation.accessibilityLabel.contains("stale"), "menu bar accessibility should disclose stale fallback")
+}
+
 func testMenuBarPresentationUsesTodaySnapshot() throws {
     let presentation = MenuBarSpendPresentation.make(
         menuBarSnapshot: try snapshot(range: .today, total: 12),
@@ -1139,6 +1163,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testMenuBarPresentationRemainsTodayWhenPopoverRangeChanges", testMenuBarPresentationRemainsTodayWhenPopoverRangeChanges),
     ("testAutomaticRefreshUpdatesMenuBarSnapshotAndSelectedRange", testAutomaticRefreshUpdatesMenuBarSnapshotAndSelectedRange),
     ("testAuthFailurePreservesMenuBarSnapshot", testAuthFailurePreservesMenuBarSnapshot),
+    ("testStaleFallbackMarksMenuBarAccessibilityStale", testStaleFallbackMarksMenuBarAccessibilityStale),
     ("testChangingMetricDoesNotRefreshSpend", testChangingMetricDoesNotRefreshSpend),
     ("testChangingMetricUpdatesMenuBarPresentation", testChangingMetricUpdatesMenuBarPresentation)
 ]

@@ -79,6 +79,18 @@ public struct SpendSnapshot: Equatable, Sendable {
         self.refreshedAt = refreshedAt
         self.isStale = isStale
     }
+
+    public func markingStale() -> SpendSnapshot {
+        SpendSnapshot(
+            range: range,
+            totalSpendUSD: totalSpendUSD,
+            limitUSD: limitUSD,
+            percentOfLimit: percentOfLimit,
+            dailyPoints: dailyPoints,
+            refreshedAt: refreshedAt,
+            isStale: true
+        )
+    }
 }
 
 public enum SpendAggregator {
