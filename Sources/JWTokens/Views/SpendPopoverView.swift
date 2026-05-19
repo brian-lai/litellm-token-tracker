@@ -62,15 +62,17 @@ struct SpendPopoverView: View {
                 TrendView(presentation: .make(analytics: viewModel.currentSnapshot?.analytics))
             case .breakdown:
                 BreakdownView(presentation: .make(analytics: viewModel.currentSnapshot?.analytics))
+            case .keys:
+                KeyBudgetView(presentation: .make(snapshot: viewModel.keyContextSnapshot, errorMessage: viewModel.keyContextErrorMessage))
             }
             Button {
                 Task {
-                    await viewModel.refresh()
+                    await viewModel.refreshSelectedMode()
                 }
             } label: {
-                Text(viewModel.isRefreshing ? "Refreshing..." : "Refresh")
+                Text((viewModel.isRefreshing || viewModel.isKeyContextRefreshing) ? "Refreshing..." : "Refresh")
             }
-            .disabled(viewModel.isRefreshing)
+            .disabled(viewModel.isRefreshing || viewModel.isKeyContextRefreshing)
             if presentation.showsKeyUpdateAction {
                 SecureField("LiteLLM API key", text: $viewModel.apiKeyDraft)
                     .textFieldStyle(.roundedBorder)
@@ -101,7 +103,9 @@ struct SpendPopoverView: View {
                     title: mode.displayName,
                     isSelected: viewModel.selectedPopoverMode == mode
                 ) {
-                    viewModel.selectPopoverMode(mode)
+                    Task {
+                        await viewModel.selectPopoverMode(mode)
+                    }
                 }
             }
         }
