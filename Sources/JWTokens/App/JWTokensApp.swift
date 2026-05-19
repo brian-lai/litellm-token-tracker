@@ -23,6 +23,9 @@ struct JWTokensApp: App {
     }
 
     private static func makeViewModel() -> SpendDashboardViewModel {
+        if let previewViewModel = JWTokensPreviewFixtures.makeViewModelFromArguments() {
+            return previewViewModel
+        }
         let apiKeyStore = KeychainAPIKeyStore()
         return SpendDashboardViewModel(
             spendService: SpendService(
