@@ -67,12 +67,12 @@ struct SpendPopoverView: View {
             }
             Button {
                 Task {
-                    await viewModel.refresh()
+                    await viewModel.refreshSelectedMode()
                 }
             } label: {
-                Text(viewModel.isRefreshing ? "Refreshing..." : "Refresh")
+                Text((viewModel.isRefreshing || viewModel.isKeyContextRefreshing) ? "Refreshing..." : "Refresh")
             }
-            .disabled(viewModel.isRefreshing)
+            .disabled(viewModel.isRefreshing || viewModel.isKeyContextRefreshing)
             if presentation.showsKeyUpdateAction {
                 SecureField("LiteLLM API key", text: $viewModel.apiKeyDraft)
                     .textFieldStyle(.roundedBorder)

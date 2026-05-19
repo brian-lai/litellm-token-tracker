@@ -34,7 +34,7 @@ public struct KeyBudgetPresentation: Equatable, Sendable {
         let currentKey = snapshot.currentKey
         return KeyBudgetPresentation(
             currentKeyName: currentKey?.displayName ?? "No current key",
-            currentKeySpendText: MenuBarTitleFormatter.currency(currentKey?.spendUSD ?? 0),
+            currentKeySpendText: "Key spend: \(MenuBarTitleFormatter.currency(currentKey?.spendUSD ?? 0))",
             currentKeyBudgetText: budgetText(for: currentKey),
             currentKeyResetText: resetText(for: currentKey?.budgetResetAt, calendar: calendar),
             ownedKeys: snapshot.ownedKeys
@@ -56,7 +56,7 @@ public struct KeyBudgetPresentation: Equatable, Sendable {
         guard let key, let maxBudget = key.maxBudgetUSD else {
             return nil
         }
-        return "\(MenuBarTitleFormatter.currency(key.spendUSD)) of \(MenuBarTitleFormatter.currency(maxBudget))"
+        return "Key budget: \(MenuBarTitleFormatter.currency(key.spendUSD)) of \(MenuBarTitleFormatter.currency(maxBudget))"
     }
 
     private static func resetText(for date: Date?, calendar: Calendar) -> String? {

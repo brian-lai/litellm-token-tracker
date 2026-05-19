@@ -173,6 +173,8 @@ final class RecordingKeyContextService: KeyContextServicing, @unchecked Sendable
         requestedDates.append(now)
         return results.removeFirst()
     }
+
+    func clearCache() {}
 }
 
 final class RecordingKeyClient: LiteLLMClientProtocol, @unchecked Sendable {
@@ -315,6 +317,15 @@ func testKeyDTOsDoNotExposeRawTokenFields() throws {
 
     try expect(!rendered.contains("sk-should-not-decode"), "decoded key DTOs should not expose raw api_key")
     try expect(!rendered.contains("token-should-not-decode"), "decoded key DTOs should not expose raw token")
+}
+
+func testKeyListStringEntriesAreIgnoredWithoutExposingTokens() throws {
+    let summaries = try LiteLLMResponseDecoder.decodeUserKeys(from: fixtureData("key-list-strings.json"))
+    let rendered = String(describing: summaries)
+
+    try expectEqual(summaries.count, 0, "minimized string key entries should not be displayed as friendly key context")
+    try expect(!rendered.contains("sk-should-not-display"), "decoded key list should not expose raw key strings")
+    try expect(!rendered.contains("token-should-not-display"), "decoded key list should not expose raw token strings")
 }
 
 func testDecodesSummarizedSpendRows() throws {
@@ -2125,12 +2136,80 @@ func testKeyContextCacheExpiresAfterFiveMinutes() async throws {
     try expectEqual(client.currentKeyCalls, 2, "key context should cache for five minutes then refresh")
 }
 
+@MainActor
+func testReenteringKeysAfterFiveMinutesRequestsKeyRefresh() async throws {
+    let first = KeyContextSnapshot(currentKey: keySummary(alias: "First", spend: 1), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
+    let second = KeyContextSnapshot(currentKey: keySummary(alias: "Second", spend: 2), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18").addingTimeInterval(301), isStale: false)
+    let keyService = RecordingKeyContextService(results: [.refreshed(first), .refreshed(second)])
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), keyContextService: keyService)
+
+    await viewModel.selectPopoverMode(.keys, now: try fixedDate("2026-05-18"))
+    await viewModel.selectPopoverMode(.overview)
+    await viewModel.selectPopoverMode(.keys, now: try fixedDate("2026-05-18").addingTimeInterval(301))
+
+    try expectEqual(keyService.requestedDates.count, 2, "re-entering Keys should ask key service to refresh so TTL can be enforced")
+    try expectEqual(viewModel.keyContextSnapshot?.currentKey?.alias, "Second", "re-entering Keys after TTL should update key context")
+}
+
+@MainActor
+func testManualRefreshInKeysRefreshesKeyContext() async throws {
+    let first = KeyContextSnapshot(currentKey: keySummary(alias: "First", spend: 1), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
+    let second = KeyContextSnapshot(currentKey: keySummary(alias: "Second", spend: 2), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
+    let keyService = RecordingKeyContextService(results: [.refreshed(first), .refreshed(second)])
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), keyContextService: keyService)
+
+    await viewModel.selectPopoverMode(.keys, now: try fixedDate("2026-05-18"))
+    await viewModel.refreshSelectedMode(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(keyService.requestedDates.count, 2, "manual refresh in Keys mode should refresh key context")
+    try expectEqual(viewModel.keyContextSnapshot?.currentKey?.alias, "Second", "manual refresh should update key context")
+}
+
+func testKeyContextCacheIsScopedByCredential() async throws {
+    let store = MutableAPIKeyStore()
+    try store.saveAPIKey("first-key")
+    let firstClient = RecordingKeyClient(
+        userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        currentKeyResult: .success(keySummary(alias: "First", spend: 1)),
+        userKeysResult: .success([])
+    )
+    let secondClient = RecordingKeyClient(
+        userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        currentKeyResult: .success(keySummary(alias: "Second", spend: 2)),
+        userKeysResult: .success([])
+    )
+    let service = KeyContextService(apiKeyStore: store, clientFactory: { _, apiKey in
+        apiKey == "first-key" ? firstClient : secondClient
+    })
+    let user = LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)
+
+    _ = await service.refresh(userContext: user, now: try fixedDate("2026-05-18"))
+    try store.saveAPIKey("second-key")
+    let result = await service.refresh(userContext: user, now: try fixedDate("2026-05-18").addingTimeInterval(60))
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "expected refreshed key context")
+    }
+    try expectEqual(snapshot.currentKey?.alias, "Second", "key context cache should not leak across credentials")
+}
+
+@MainActor
+func testAPIKeyChangeClearsVisibleKeyContext() async throws {
+    let snapshot = KeyContextSnapshot(currentKey: keySummary(alias: "First", spend: 1), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), keyContextService: RecordingKeyContextService(results: [.refreshed(snapshot)]))
+
+    await viewModel.selectPopoverMode(.keys, now: try fixedDate("2026-05-18"))
+    viewModel.apiKeyDidChange()
+
+    try expectEqual(viewModel.keyContextSnapshot, nil, "visible key context should clear when API key changes")
+}
+
 func testKeysModeShowsCurrentKeyAlias() throws {
     let snapshot = KeyContextSnapshot(currentKey: keySummary(alias: "Claude Code", spend: 65), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
     let presentation = KeyBudgetPresentation.make(snapshot: snapshot, errorMessage: nil, calendar: fixedCalendar())
 
     try expectEqual(presentation.currentKeyName, "Claude Code", "keys presentation should show current key alias")
-    try expectEqual(presentation.currentKeySpendText, "$65.00", "keys presentation should show current key spend")
+    try expectEqual(presentation.currentKeySpendText, "Key spend: $65.00", "keys presentation should label current key spend")
 }
 
 func testKeysModeRanksOwnedKeysBySpend() throws {
@@ -2158,7 +2237,7 @@ func testKeysModeShowsBudgetResetContext() throws {
     )
     let presentation = KeyBudgetPresentation.make(snapshot: snapshot, errorMessage: nil, calendar: fixedCalendar())
 
-    try expectEqual(presentation.currentKeyBudgetText, "$65.00 of $80.00", "keys presentation should show budget spend context")
+    try expectEqual(presentation.currentKeyBudgetText, "Key budget: $65.00 of $80.00", "keys presentation should label budget spend context")
     try expect(presentation.currentKeyResetText?.contains("Jun 1") == true, "keys presentation should show budget reset context")
 }
 
@@ -2199,6 +2278,7 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testDecodesCurrentKeyInfoSafeFieldsOnly", testDecodesCurrentKeyInfoSafeFieldsOnly),
     ("testDecodesUserKeyListAliasesAndBudgets", testDecodesUserKeyListAliasesAndBudgets),
     ("testKeyDTOsDoNotExposeRawTokenFields", testKeyDTOsDoNotExposeRawTokenFields),
+    ("testKeyListStringEntriesAreIgnoredWithoutExposingTokens", testKeyListStringEntriesAreIgnoredWithoutExposingTokens),
     ("testDecodesSummarizedSpendRows", testDecodesSummarizedSpendRows),
     ("testDecodesMissingSpendAsZero", testDecodesMissingSpendAsZero),
     ("testSkipsRowsWithUnparseableDates", testSkipsRowsWithUnparseableDates),
@@ -2294,6 +2374,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testKeyEndpointsMapUnauthorizedWithoutBreakingSpend", testKeyEndpointsMapUnauthorizedWithoutBreakingSpend),
     ("testKeyContextUsesStaleValueWhenAvailable", testKeyContextUsesStaleValueWhenAvailable),
     ("testKeyContextCacheExpiresAfterFiveMinutes", testKeyContextCacheExpiresAfterFiveMinutes),
+    ("testKeyContextCacheIsScopedByCredential", testKeyContextCacheIsScopedByCredential),
     ("testRefreshFetchesUserThenTodaySpend", testRefreshFetchesUserThenTodaySpend),
     ("testRefreshPrefersDailyActivitySummary", testRefreshPrefersDailyActivitySummary),
     ("testRefreshMarksActivitySource", testRefreshMarksActivitySource),
@@ -2333,10 +2414,13 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testChangingMetricUpdatesMenuBarPresentation", testChangingMetricUpdatesMenuBarPresentation),
     ("testMetricAndRangeControlsRemainIndependent", testMetricAndRangeControlsRemainIndependent),
     ("testDefaultPopoverModeIsOverview", testDefaultPopoverModeIsOverview),
-    ("testSelectingPopoverModeDoesNotRefreshSpend", testSelectingPopoverModeDoesNotRefreshSpend)
-    ,("testKeysModeLoadsKeyContextLazily", testKeysModeLoadsKeyContextLazily)
-    ,("testKeyContextUsesCachedUserIDFromAnalyticsRefresh", testKeyContextUsesCachedUserIDFromAnalyticsRefresh)
-    ,("testKeyContextFailurePreservesSpendSnapshot", testKeyContextFailurePreservesSpendSnapshot)
+    ("testSelectingPopoverModeDoesNotRefreshSpend", testSelectingPopoverModeDoesNotRefreshSpend),
+    ("testKeysModeLoadsKeyContextLazily", testKeysModeLoadsKeyContextLazily),
+    ("testKeyContextUsesCachedUserIDFromAnalyticsRefresh", testKeyContextUsesCachedUserIDFromAnalyticsRefresh),
+    ("testKeyContextFailurePreservesSpendSnapshot", testKeyContextFailurePreservesSpendSnapshot),
+    ("testReenteringKeysAfterFiveMinutesRequestsKeyRefresh", testReenteringKeysAfterFiveMinutesRequestsKeyRefresh),
+    ("testManualRefreshInKeysRefreshesKeyContext", testManualRefreshInKeysRefreshesKeyContext),
+    ("testAPIKeyChangeClearsVisibleKeyContext", testAPIKeyChangeClearsVisibleKeyContext)
 ]
 
 var failures: [String] = []

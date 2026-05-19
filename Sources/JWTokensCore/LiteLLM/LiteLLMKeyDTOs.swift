@@ -30,7 +30,33 @@ public struct LiteLLMKeyInfoResponse: Decodable, Equatable, Sendable {
 }
 
 public struct LiteLLMKeyListResponse: Decodable, Equatable, Sendable {
-    public let keys: [LiteLLMKeyInfoResponse]
+    public let keys: [LiteLLMKeyListEntry]
+}
+
+public enum LiteLLMKeyListEntry: Decodable, Equatable, Sendable {
+    case object(LiteLLMKeyInfoResponse)
+    case redactedString
+
+    public init(from decoder: Decoder) throws {
+        if let object = try? LiteLLMKeyInfoResponse(from: decoder) {
+            self = .object(object)
+            return
+        }
+        if (try? decoder.singleValueContainer().decode(String.self)) != nil {
+            self = .redactedString
+            return
+        }
+        throw LiteLLMClientError.malformedResponse
+    }
+
+    public var summary: KeySpendSummary? {
+        switch self {
+        case let .object(response):
+            return response.toDomain()
+        case .redactedString:
+            return nil
+        }
+    }
 }
 
 public extension LiteLLMResponseDecoder {
@@ -46,7 +72,7 @@ public extension LiteLLMResponseDecoder {
         do {
             let decoder = makeJSONDecoder()
             if let wrapped = try? decoder.decode(LiteLLMKeyListResponse.self, from: data) {
-                return wrapped.keys.map { $0.toDomain() }
+                return wrapped.keys.compactMap(\.summary)
             }
             return try decoder.decode([LiteLLMKeyInfoResponse].self, from: data).map { $0.toDomain() }
         } catch {

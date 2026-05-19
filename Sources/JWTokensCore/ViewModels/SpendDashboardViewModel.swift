@@ -75,6 +75,14 @@ public final class SpendDashboardViewModel {
         }
     }
 
+    public func refreshSelectedMode(now: Date = Date(), calendar: Calendar = .current) async {
+        if selectedPopoverMode == .keys {
+            await refreshKeyContext(now: now)
+        } else {
+            await refresh(now: now, calendar: calendar)
+        }
+    }
+
     public func selectRange(_ range: SpendRange, now: Date = Date(), calendar: Calendar = .current) async {
         guard range != selectedRange else {
             return
@@ -94,7 +102,7 @@ public final class SpendDashboardViewModel {
 
     public func selectPopoverMode(_ mode: SpendPopoverMode, now: Date = Date()) async {
         selectedPopoverMode = mode
-        if mode == .keys, keyContextSnapshot == nil {
+        if mode == .keys {
             await refreshKeyContext(now: now)
         }
     }
@@ -122,6 +130,9 @@ public final class SpendDashboardViewModel {
     public func apiKeyDidChange() {
         pausesAutomaticRefresh = false
         requiresSetup = false
+        keyContextSnapshot = nil
+        keyContextErrorMessage = nil
+        keyContextService?.clearCache()
     }
 
     public func saveAPIKey() {
