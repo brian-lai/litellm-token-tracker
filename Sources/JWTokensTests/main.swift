@@ -665,6 +665,58 @@ func testShowsSelectedRangeTotalAndPercent() throws {
     try expectEqual(presentation.percentText, "30%", "popover should show selected range percent")
 }
 
+func testPopoverPresentationIncludesPrimaryGauge() throws {
+    let presentation = SpendPopoverPresentation.make(
+        range: .today,
+        snapshot: try snapshot(range: .today, total: 40),
+        errorMessage: nil,
+        requiresSetup: false,
+        calendar: fixedCalendar()
+    )
+
+    try expectEqual(presentation.primaryGauge.progress, 0.5, "popover should include selected range gauge progress")
+    try expectEqual(presentation.primaryGauge.band, .yellow, "popover gauge should use spend band")
+}
+
+func testPopoverPresentationShowsLimitText() throws {
+    let presentation = SpendPopoverPresentation.make(
+        range: .today,
+        snapshot: try snapshot(range: .today, total: 20),
+        errorMessage: nil,
+        requiresSetup: false,
+        calendar: fixedCalendar()
+    )
+
+    try expectEqual(presentation.limitText, "Limit $80.00", "popover should show spend limit")
+    try expectEqual(presentation.overLimitText, nil, "under-limit spend should not show over-limit text")
+}
+
+func testPopoverPresentationShowsOverLimitState() throws {
+    let presentation = SpendPopoverPresentation.make(
+        range: .today,
+        snapshot: try snapshot(range: .today, total: 96),
+        errorMessage: nil,
+        requiresSetup: false,
+        calendar: fixedCalendar()
+    )
+
+    try expectEqual(presentation.primaryGauge.progress, 1, "over-limit gauge should clamp")
+    try expectEqual(presentation.overLimitText, "$16.00 over limit", "popover should show over-limit amount")
+}
+
+func testPopoverPresentationPreservesStaleStatus() throws {
+    let presentation = SpendPopoverPresentation.make(
+        range: .today,
+        snapshot: try snapshot(range: .today, total: 5, isStale: true),
+        errorMessage: "Showing last known spend",
+        requiresSetup: false,
+        calendar: fixedCalendar()
+    )
+
+    try expect(presentation.primaryGauge.accessibilityLabel.contains("stale"), "popover gauge should preserve stale context")
+    try expectEqual(presentation.statusText, "Showing last known spend", "popover should preserve stale message")
+}
+
 func testStaleSnapshotShowsTimestamp() throws {
     let presentation = SpendPopoverPresentation.make(
         range: .today,
@@ -1112,6 +1164,10 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testSetupStateUsesCompactTitle", testSetupStateUsesCompactTitle),
     ("testShowsAllFiveRanges", testShowsAllFiveRanges),
     ("testShowsSelectedRangeTotalAndPercent", testShowsSelectedRangeTotalAndPercent),
+    ("testPopoverPresentationIncludesPrimaryGauge", testPopoverPresentationIncludesPrimaryGauge),
+    ("testPopoverPresentationShowsLimitText", testPopoverPresentationShowsLimitText),
+    ("testPopoverPresentationShowsOverLimitState", testPopoverPresentationShowsOverLimitState),
+    ("testPopoverPresentationPreservesStaleStatus", testPopoverPresentationPreservesStaleStatus),
     ("testStaleSnapshotShowsTimestamp", testStaleSnapshotShowsTimestamp),
     ("testAuthErrorShowsKeyUpdateAction", testAuthErrorShowsKeyUpdateAction),
     ("testDailyChartRendersOneBarPerPoint", testDailyChartRendersOneBarPerPoint),
