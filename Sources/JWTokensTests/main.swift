@@ -740,6 +740,23 @@ func testGaugeAccessibilityLabelIncludesRangeAndSpend() throws {
     try expect(presentation.accessibilityLabel.contains("50%"), "gauge accessibility should include spend percent")
 }
 
+func testPopoverFixtureUsesGaugeFirstLayout() throws {
+    let presentation = SpendPopoverPresentation.make(
+        range: .today,
+        snapshot: try snapshot(range: .today, total: 33),
+        errorMessage: nil,
+        requiresSetup: false,
+        calendar: fixedCalendar()
+    )
+
+    try expectEqual(presentation.primaryGauge.label, "$33", "popover presentation should provide gauge-first label")
+}
+
+func testPopoverFixtureKeepsAllPrimaryControls() throws {
+    try expectEqual(SpendRange.allCases.count, 5, "popover should keep all range controls")
+    try expectEqual(MenuBarMetric.allCases.count, 2, "popover should keep metric controls")
+}
+
 func testStaleSnapshotShowsTimestamp() throws {
     let presentation = SpendPopoverPresentation.make(
         range: .today,
@@ -1193,6 +1210,8 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testPopoverPresentationPreservesStaleStatus", testPopoverPresentationPreservesStaleStatus),
     ("testGaugePresentationUsesBandColor", testGaugePresentationUsesBandColor),
     ("testGaugeAccessibilityLabelIncludesRangeAndSpend", testGaugeAccessibilityLabelIncludesRangeAndSpend),
+    ("testPopoverFixtureUsesGaugeFirstLayout", testPopoverFixtureUsesGaugeFirstLayout),
+    ("testPopoverFixtureKeepsAllPrimaryControls", testPopoverFixtureKeepsAllPrimaryControls),
     ("testStaleSnapshotShowsTimestamp", testStaleSnapshotShowsTimestamp),
     ("testAuthErrorShowsKeyUpdateAction", testAuthErrorShowsKeyUpdateAction),
     ("testDailyChartRendersOneBarPerPoint", testDailyChartRendersOneBarPerPoint),
