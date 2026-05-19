@@ -71,7 +71,8 @@ struct SpendPopoverView: View {
                         baseURLText: viewModel.baseURLDraft,
                         spendLimitText: viewModel.spendLimitDraft,
                         snapshot: viewModel.currentSnapshot,
-                        settingsError: viewModel.settingsErrorMessage
+                        settingsError: viewModel.settingsErrorMessage,
+                        lastError: viewModel.settingsErrorMessage ?? viewModel.errorMessage ?? viewModel.keyContextErrorMessage
                     )
                 )
             }

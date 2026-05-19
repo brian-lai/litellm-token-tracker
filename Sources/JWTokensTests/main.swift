@@ -2506,7 +2506,7 @@ func testSettingsModeShowsBaseURL() throws {
     let presentation = SettingsPresentation.make(baseURLText: "https://litellm.justworksai.net", spendLimitText: "80", snapshot: nil, settingsError: nil)
     let rows = Dictionary(uniqueKeysWithValues: presentation.diagnosticRows.map { ($0.label, $0.value) })
 
-    try expectEqual(rows["Base URL"], "https://litellm.justworksai.net", "settings diagnostics should show configured base URL")
+    try expectEqual(rows["Endpoint"], "https://litellm.justworksai.net", "settings diagnostics should show configured base URL")
 }
 
 func testSettingsModeDocumentsLocalFileStoreRisk() throws {
@@ -2514,6 +2514,53 @@ func testSettingsModeDocumentsLocalFileStoreRisk() throws {
 
     try expect(presentation.warningText.contains("local-development exception"), "settings diagnostics should document local file credential risk")
     try expect(presentation.warningText.contains("Keychain"), "settings diagnostics should point company builds back to Keychain or managed storage")
+}
+
+func testDiagnosticSummaryRedactsAPIKey() throws {
+    let summary = DiagnosticSummary.make(
+        baseURLText: "https://litellm.justworksai.net",
+        snapshot: nil,
+        lastError: "Request failed for Bearer secret-token and sk-should-not-display"
+    )
+    let rendered = String(describing: summary)
+
+    try expect(!rendered.contains("secret-token"), "diagnostic summary should redact API key-like values")
+    try expect(!rendered.contains("sk-should-not-display"), "diagnostic summary should redact raw LiteLLM key-like values")
+}
+
+func testDiagnosticSummaryDoesNotIncludeCredentialPathByDefault() throws {
+    let summary = DiagnosticSummary.make(baseURLText: "https://litellm.justworksai.net", snapshot: nil)
+    let rows = Dictionary(uniqueKeysWithValues: summary.rows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Credential path"], "Hidden by default", "diagnostic summary should not include the credential path by default")
+}
+
+func testDiagnosticSummaryIncludesEndpointSourceAndUserID() throws {
+    let user = LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)
+    let snapshot = SpendSnapshot(
+        range: .today,
+        totalSpendUSD: 8,
+        limitUSD: 80,
+        percentOfLimit: Decimal(string: "0.1")!,
+        dailyPoints: [],
+        refreshedAt: try fixedDate("2026-05-18"),
+        isStale: false,
+        analytics: analyticsSummary(totalSpendUSD: 8, dailyPoints: [], source: .userDailyActivity),
+        userContext: user
+    )
+    let summary = DiagnosticSummary.make(baseURLText: "https://litellm.justworksai.net", snapshot: snapshot)
+    let rows = Dictionary(uniqueKeysWithValues: summary.rows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Endpoint"], "https://litellm.justworksai.net", "diagnostic summary should include endpoint")
+    try expectEqual(rows["Source"], "Daily activity", "diagnostic summary should include data source")
+    try expectEqual(rows["User"], "user-123", "diagnostic summary should include user id")
+}
+
+func testDiagnosticSummaryIncludesLastError() throws {
+    let summary = DiagnosticSummary.make(baseURLText: "https://litellm.justworksai.net", snapshot: nil, lastError: "Unable to refresh spend")
+    let rows = Dictionary(uniqueKeysWithValues: summary.rows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Last error"], "Unable to refresh spend", "diagnostic summary should include last scoped error")
 }
 
 func testKeysModeShowsCurrentKeyAlias() throws {
@@ -2680,6 +2727,10 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testSettingsModeShowsDataSource", testSettingsModeShowsDataSource),
     ("testSettingsModeShowsBaseURL", testSettingsModeShowsBaseURL),
     ("testSettingsModeDocumentsLocalFileStoreRisk", testSettingsModeDocumentsLocalFileStoreRisk),
+    ("testDiagnosticSummaryRedactsAPIKey", testDiagnosticSummaryRedactsAPIKey),
+    ("testDiagnosticSummaryDoesNotIncludeCredentialPathByDefault", testDiagnosticSummaryDoesNotIncludeCredentialPathByDefault),
+    ("testDiagnosticSummaryIncludesEndpointSourceAndUserID", testDiagnosticSummaryIncludesEndpointSourceAndUserID),
+    ("testDiagnosticSummaryIncludesLastError", testDiagnosticSummaryIncludesLastError),
     ("testSpendStatusBandThresholds", testSpendStatusBandThresholds),
     ("testRingProgressClampsOverLimitSpend", testRingProgressClampsOverLimitSpend),
     ("testRingPresentationFormatsDollarMetric", testRingPresentationFormatsDollarMetric),
