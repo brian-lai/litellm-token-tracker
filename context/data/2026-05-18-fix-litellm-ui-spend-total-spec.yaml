@@ -1,0 +1,47 @@
+name: fix-litellm-ui-spend-total
+date: 2026-05-18
+scope:
+  - Match LiteLLM UI "Your Usage" daily spend totals for local-day ranges.
+  - Restore readable popover range and metric controls.
+  - Preserve existing /spend/logs fallback for deployments where daily activity is unavailable.
+api_contracts:
+  user_daily_activity:
+    method: GET
+    path: /user/daily/activity
+    query:
+      user_id: current user id from /user/info
+      start_date: inclusive local range start formatted YYYY-MM-DD
+      end_date: inclusive local range end formatted YYYY-MM-DD
+      timezone: JavaScript Date.getTimezoneOffset convention in minutes
+      page_size: 1000
+    response:
+      metadata:
+        total_spend: number
+      results:
+        - date: YYYY-MM-DD
+          metrics:
+            spend: number
+    parsing:
+      total: metadata.total_spend if present, otherwise sum results[].metrics.spend
+      points: results with parseable date values, spend defaulting to 0
+      malformed: invalid top-level shape maps to malformedResponse
+  fallback_spend_logs:
+    method: GET
+    path: /spend/logs
+    query:
+      summarize: true
+    behavior: Use existing summarized spend-log path when /user/daily/activity is unavailable or malformed.
+ui_contract:
+  range_controls: Show all five ranges as readable buttons with selected state.
+  menu_metric_controls: Show Dollars and Percent as readable buttons with selected state.
+  details:
+    - Spend
+    - Usage
+    - Limit
+    - Updated
+tests:
+  - testDecodesUserDailyActivitySummary
+  - testUserDailyActivityRequestUsesInclusiveEndDateAndTimezone
+  - testRefreshPrefersDailyActivitySummary
+  - testRefreshFallsBackToSpendLogsWhenDailyActivityUnavailable
+  - testPopoverPresentationIncludesMetricRows

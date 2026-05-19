@@ -48,6 +48,33 @@ public struct LiteLLMSpendLogDecodeResult: Equatable, Sendable {
     public let skippedRowCount: Int
 }
 
+public struct LiteLLMUserDailyActivityResponse: Decodable, Equatable, Sendable {
+    public struct Metadata: Decodable, Equatable, Sendable {
+        public let totalSpend: Decimal?
+
+        enum CodingKeys: String, CodingKey {
+            case totalSpend = "total_spend"
+        }
+    }
+
+    public struct Result: Decodable, Equatable, Sendable {
+        public struct Metrics: Decodable, Equatable, Sendable {
+            public let spend: Decimal?
+        }
+
+        public let date: String?
+        public let metrics: Metrics?
+    }
+
+    public let metadata: Metadata?
+    public let results: [Result]
+}
+
+public struct LiteLLMUserDailyActivityDecodeResult: Equatable, Sendable {
+    public let summary: SpendActivitySummary
+    public let skippedRowCount: Int
+}
+
 public enum LiteLLMResponseDecoder {
     public static func makeJSONDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
@@ -93,6 +120,34 @@ public enum LiteLLMResponseDecoder {
         }
 
         return LiteLLMSpendLogDecodeResult(rows: rows, skippedRowCount: skipped)
+    }
+
+    public static func decodeUserDailyActivity(from data: Data, calendar: Calendar = .current) throws -> LiteLLMUserDailyActivityDecodeResult {
+        let decoded: LiteLLMUserDailyActivityResponse
+        do {
+            decoded = try makeJSONDecoder().decode(LiteLLMUserDailyActivityResponse.self, from: data)
+        } catch {
+            throw LiteLLMClientError.malformedResponse
+        }
+
+        var skipped = 0
+        var points: [DailySpendPoint] = []
+        let dateFormatter = DateFormatter.liteLLMDay(timeZone: calendar.timeZone)
+
+        for result in decoded.results {
+            guard let dateString = result.date,
+                  let date = dateFormatter.date(from: dateString) else {
+                skipped += 1
+                continue
+            }
+            points.append(DailySpendPoint(date: date, spendUSD: result.metrics?.spend ?? 0))
+        }
+
+        let fallbackTotal = points.reduce(Decimal(0)) { $0 + $1.spendUSD }
+        return LiteLLMUserDailyActivityDecodeResult(
+            summary: SpendActivitySummary(totalSpendUSD: decoded.metadata?.totalSpend ?? fallbackTotal, dailyPoints: points),
+            skippedRowCount: skipped
+        )
     }
 }
 

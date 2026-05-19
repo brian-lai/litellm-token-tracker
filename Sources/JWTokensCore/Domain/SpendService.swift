@@ -28,14 +28,25 @@ public struct SpendService: SpendServicing {
             let client = clientFactory(configuration.baseURL, apiKey)
             let user = try await client.fetchCurrentUser()
             let dateRange = rangeResolver.dateRange(for: range, now: now, calendar: calendar)
-            let rows = try await client.fetchSpendRows(range: dateRange, userID: user.userID)
-            let snapshot = SpendAggregator.snapshot(
-                rows: rows,
-                range: range,
-                dateRange: dateRange,
-                limitUSD: configuration.spendLimitUSD,
-                refreshedAt: now
-            )
+            let snapshot: SpendSnapshot
+            do {
+                let activity = try await client.fetchUserDailyActivity(range: dateRange, userID: user.userID)
+                snapshot = SpendAggregator.snapshot(
+                    activity: activity,
+                    range: range,
+                    limitUSD: configuration.spendLimitUSD,
+                    refreshedAt: now
+                )
+            } catch {
+                let rows = try await client.fetchSpendRows(range: dateRange, userID: user.userID)
+                snapshot = SpendAggregator.snapshot(
+                    rows: rows,
+                    range: range,
+                    dateRange: dateRange,
+                    limitUSD: configuration.spendLimitUSD,
+                    refreshedAt: now
+                )
+            }
             try? cache.saveSnapshot(snapshot)
             return .refreshed(snapshot)
         } catch APIKeyStoreError.missingKey {

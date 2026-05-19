@@ -116,10 +116,18 @@ final class FakeMenuBarPreferenceStore: MenuBarPreferenceStoring, @unchecked Sen
 
 struct FakeClient: LiteLLMClientProtocol {
     var userResult: Result<LiteLLMUserContext, Error>
+    var activityResult: Result<SpendActivitySummary, Error>?
     var rowsResult: Result<[SpendLogSummaryRow], Error>
 
     func fetchCurrentUser() async throws -> LiteLLMUserContext {
         try userResult.get()
+    }
+
+    func fetchUserDailyActivity(range: DateRange, userID: String) async throws -> SpendActivitySummary {
+        if let activityResult {
+            return try activityResult.get()
+        }
+        throw LiteLLMClientError.unavailable
     }
 
     func fetchSpendRows(range: DateRange, userID: String) async throws -> [SpendLogSummaryRow] {
@@ -242,6 +250,26 @@ func testFullyInvalidSpendLogsResponseMapsToMalformedResponse() throws {
     } catch LiteLLMClientError.malformedResponse {
         return
     }
+}
+
+func testDecodesUserDailyActivitySummary() throws {
+    let timeZone = TimeZone(identifier: "America/New_York")!
+    let result = try LiteLLMResponseDecoder.decodeUserDailyActivity(
+        from: fixtureData("user-daily-activity.json"),
+        calendar: fixedCalendar(timeZone: timeZone)
+    )
+
+    try expectEqual(result.summary.totalSpendUSD, Decimal(string: "65.5663")!, "activity metadata total should decode")
+    try expectEqual(result.summary.dailyPoints.count, 2, "valid activity rows should decode into daily points")
+    try expectEqual(result.summary.dailyPoints[0].spendUSD, Decimal(string: "17.067627950000004")!, "activity spend should decode")
+    try expectEqual(result.skippedRowCount, 1, "unparseable dates should be skipped")
+}
+
+func testUserDailyActivityFallbackSumsRowsWhenMetadataTotalIsMissing() throws {
+    let data = Data(#"{"results":[{"date":"2026-05-18","metrics":{"spend":2.5}},{"date":"2026-05-19","metrics":{"spend":3}}]}"#.utf8)
+    let result = try LiteLLMResponseDecoder.decodeUserDailyActivity(from: data, calendar: fixedCalendar())
+
+    try expectEqual(result.summary.totalSpendUSD, Decimal(string: "5.5")!, "decoder should sum activity rows when metadata total is absent")
 }
 
 func fixedCalendar() -> Calendar {
@@ -373,6 +401,28 @@ func testSpendLogsRequestUsesSummarizeTrueAndExclusiveEndDate() async throws {
     try expectEqual(query["summarize"], "true", "summarize query should be true")
 }
 
+func testUserDailyActivityRequestUsesInclusiveEndDateAndTimezone() async throws {
+    let loader = StubURLLoader(data: try fixtureData("user-daily-activity.json"))
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+    let timeZone = TimeZone(identifier: "America/New_York")!
+    let range = DateRange(
+        startDate: try fixedDate("2026-05-18", timeZone: timeZone),
+        endDate: try fixedDate("2026-05-19", timeZone: timeZone),
+        timeZone: timeZone
+    )
+
+    _ = try await client.fetchUserDailyActivity(range: range, userID: "user-123")
+
+    let components = URLComponents(url: loader.requests.first!.url!, resolvingAgainstBaseURL: false)
+    let query = Dictionary(uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+    try expectEqual(loader.requests.first?.url?.path, "/user/daily/activity", "activity request path should be correct")
+    try expectEqual(query["user_id"], "user-123", "user_id query should be present")
+    try expectEqual(query["start_date"], "2026-05-18", "start date query should be present")
+    try expectEqual(query["end_date"], "2026-05-18", "activity end date should be inclusive")
+    try expectEqual(query["timezone"], "240", "timezone should use JavaScript offset minutes")
+    try expectEqual(query["page_size"], "1000", "activity request should fetch enough daily rows for supported ranges")
+}
+
 func testMapsUnauthorized() async throws {
     let loader = StubURLLoader(data: Data(#"{"error":"no"}"#.utf8), statusCode: 401)
     let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
@@ -417,6 +467,16 @@ func testFetchSpendRowsDoesNotComputeSnapshot() async throws {
     let rows = try await client.fetchSpendRows(range: range, userID: "user-123")
 
     try expectEqual(rows.count, 3, "client should return decoded rows, not an aggregated snapshot")
+}
+
+func testFetchUserDailyActivityDoesNotLogPayloads() async throws {
+    let logger = CapturingLogger()
+    let loader = StubURLLoader(data: try fixtureData("user-daily-activity.json"))
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader, logger: logger)
+    let summary = try await client.fetchUserDailyActivity(range: try utcDateRange(), userID: "user-123")
+
+    try expectEqual(summary.totalSpendUSD, Decimal(string: "65.5663")!, "client should return decoded activity total")
+    try expect(!String(describing: logger.events).contains("65.5663"), "logs should not include raw spend payload values")
 }
 
 func testSaveReadDeleteUsesGateway() throws {
@@ -472,6 +532,78 @@ func testRefreshFetchesUserThenTodaySpend() async throws {
         throw TestFailure(description: "expected refreshed result")
     }
     try expectEqual(snapshot.totalSpendUSD, 8, "service should aggregate today's spend")
+}
+
+func testRefreshPrefersDailyActivitySummary() async throws {
+    let activity = SpendActivitySummary(
+        totalSpendUSD: Decimal(string: "65.5663")!,
+        dailyPoints: [
+            DailySpendPoint(date: try fixedDate("2026-05-18"), spendUSD: Decimal(string: "48.498672049999996")!),
+            DailySpendPoint(date: try fixedDate("2026-05-19"), spendUSD: Decimal(string: "17.067627950000004")!)
+        ]
+    )
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(spendLimitUSD: 80)),
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 100, maxBudgetUSD: nil, budgetResetAt: nil)),
+                activityResult: .success(activity),
+                rowsResult: .success([SpendLogSummaryRow(date: try! fixedDate("2026-05-18"), spendUSD: 8)])
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "expected refreshed result")
+    }
+    try expectEqual(snapshot.totalSpendUSD, Decimal(string: "65.5663")!, "service should prefer activity summary total")
+    try expectEqual(snapshot.percentOfLimit, Decimal(string: "0.81957875")!, "percent should be based on activity total")
+    try expectEqual(snapshot.dailyPoints.count, 2, "activity points should be preserved for the chart")
+}
+
+func testRefreshFallsBackToSpendLogsWhenDailyActivityUnavailable() async throws {
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(spendLimitUSD: 80)),
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 100, maxBudgetUSD: nil, budgetResetAt: nil)),
+                activityResult: .failure(LiteLLMClientError.unavailable),
+                rowsResult: .success([SpendLogSummaryRow(date: try! fixedDate("2026-05-18"), spendUSD: 8)])
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "expected refreshed result")
+    }
+    try expectEqual(snapshot.totalSpendUSD, 8, "service should fall back to summarized spend logs")
+}
+
+func testRefreshFallsBackToSpendLogsWhenDailyActivityIsUnauthorized() async throws {
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(spendLimitUSD: 80)),
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 100, maxBudgetUSD: nil, budgetResetAt: nil)),
+                activityResult: .failure(LiteLLMClientError.unauthorized),
+                rowsResult: .success([SpendLogSummaryRow(date: try! fixedDate("2026-05-18"), spendUSD: 8)])
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "expected refreshed result")
+    }
+    try expectEqual(snapshot.totalSpendUSD, 8, "activity route auth failures should fall back to summarized spend logs")
 }
 
 func testReturnsStaleSnapshotOnTransientAPIFailure() async throws {
@@ -689,6 +821,22 @@ func testPopoverPresentationShowsLimitText() throws {
 
     try expectEqual(presentation.limitText, "Limit $80.00", "popover should show spend limit")
     try expectEqual(presentation.overLimitText, nil, "under-limit spend should not show over-limit text")
+}
+
+func testPopoverPresentationIncludesMetricRows() throws {
+    let presentation = SpendPopoverPresentation.make(
+        range: .today,
+        snapshot: try snapshot(range: .today, total: 40),
+        errorMessage: nil,
+        requiresSetup: false,
+        calendar: fixedCalendar()
+    )
+
+    let rows = Dictionary(uniqueKeysWithValues: presentation.detailRows.map { ($0.label, $0.value) })
+    try expectEqual(rows["Spend"], "$40.00", "detail rows should include spend")
+    try expectEqual(rows["Usage"], "50%", "detail rows should include usage percent")
+    try expectEqual(rows["Limit"], "$80.00", "detail rows should include limit")
+    try expectEqual(rows["Updated"], "12:00 AM", "detail rows should include refresh time")
 }
 
 func testPopoverPresentationShowsOverLimitState() throws {
@@ -1224,8 +1372,9 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testDecodesSummarizedSpendRows", testDecodesSummarizedSpendRows),
     ("testDecodesMissingSpendAsZero", testDecodesMissingSpendAsZero),
     ("testSkipsRowsWithUnparseableDates", testSkipsRowsWithUnparseableDates),
-    ("testFullyInvalidSpendLogsResponseMapsToMalformedResponse", testFullyInvalidSpendLogsResponseMapsToMalformedResponse)
-    ,
+    ("testFullyInvalidSpendLogsResponseMapsToMalformedResponse", testFullyInvalidSpendLogsResponseMapsToMalformedResponse),
+    ("testDecodesUserDailyActivitySummary", testDecodesUserDailyActivitySummary),
+    ("testUserDailyActivityFallbackSumsRowsWhenMetadataTotalIsMissing", testUserDailyActivityFallbackSumsRowsWhenMetadataTotalIsMissing),
     ("testDecodesSummarizedSpendRowsInRequestedTimezone", testDecodesSummarizedSpendRowsInRequestedTimezone),
     ("testTodayUsesTomorrowAsExclusiveEnd", testTodayUsesTomorrowAsExclusiveEnd),
     ("testLast7DaysIncludesTodayAndSixPriorDays", testLast7DaysIncludesTodayAndSixPriorDays),
@@ -1241,6 +1390,7 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testShowsSelectedRangeTotalAndPercent", testShowsSelectedRangeTotalAndPercent),
     ("testPopoverPresentationIncludesPrimaryGauge", testPopoverPresentationIncludesPrimaryGauge),
     ("testPopoverPresentationShowsLimitText", testPopoverPresentationShowsLimitText),
+    ("testPopoverPresentationIncludesMetricRows", testPopoverPresentationIncludesMetricRows),
     ("testPopoverPresentationShowsOverLimitState", testPopoverPresentationShowsOverLimitState),
     ("testPopoverPresentationPreservesStaleStatus", testPopoverPresentationPreservesStaleStatus),
     ("testGaugePresentationUsesBandColor", testGaugePresentationUsesBandColor),
@@ -1271,12 +1421,16 @@ let syncTests: [(String, () throws -> Void)] = [
 let asyncTests: [(String, () async throws -> Void)] = [
     ("testUserInfoRequestUsesAuthorizationBearer", testUserInfoRequestUsesAuthorizationBearer),
     ("testSpendLogsRequestUsesSummarizeTrueAndExclusiveEndDate", testSpendLogsRequestUsesSummarizeTrueAndExclusiveEndDate),
+    ("testUserDailyActivityRequestUsesInclusiveEndDateAndTimezone", testUserDailyActivityRequestUsesInclusiveEndDateAndTimezone),
     ("testMapsUnauthorized", testMapsUnauthorized),
     ("testMapsFullyInvalidJSONToMalformedResponse", testMapsFullyInvalidJSONToMalformedResponse),
     ("testRedactsAuthorizationHeaderFromLogs", testRedactsAuthorizationHeaderFromLogs),
-    ("testFetchSpendRowsDoesNotComputeSnapshot", testFetchSpendRowsDoesNotComputeSnapshot)
-    ,
+    ("testFetchSpendRowsDoesNotComputeSnapshot", testFetchSpendRowsDoesNotComputeSnapshot),
+    ("testFetchUserDailyActivityDoesNotLogPayloads", testFetchUserDailyActivityDoesNotLogPayloads),
     ("testRefreshFetchesUserThenTodaySpend", testRefreshFetchesUserThenTodaySpend),
+    ("testRefreshPrefersDailyActivitySummary", testRefreshPrefersDailyActivitySummary),
+    ("testRefreshFallsBackToSpendLogsWhenDailyActivityUnavailable", testRefreshFallsBackToSpendLogsWhenDailyActivityUnavailable),
+    ("testRefreshFallsBackToSpendLogsWhenDailyActivityIsUnauthorized", testRefreshFallsBackToSpendLogsWhenDailyActivityIsUnauthorized),
     ("testReturnsStaleSnapshotOnTransientAPIFailure", testReturnsStaleSnapshotOnTransientAPIFailure),
     ("testAuthFailureReturnsAuthFailedWithoutRetrying", testAuthFailureReturnsAuthFailedWithoutRetrying),
     ("testMissingKeyReturnsSetupRequired", testMissingKeyReturnsSetupRequired),
