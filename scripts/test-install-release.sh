@@ -161,22 +161,16 @@ exit "${MOCK_OPEN_EXIT}"
 EOF
   chmod 755 "${mock_bin}/open"
 
-  cat > "${mock_bin}/python3" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ "${MOCK_DISABLE_PYTHON3}" == "1" ]]; then
-  printf 'python3 unavailable\n' >&2
-  exit 127
-fi
-exec /usr/bin/python3 "$@"
-EOF
-  chmod 755 "${mock_bin}/python3"
+  local run_path="${mock_bin}:/usr/bin:/bin:/usr/sbin:/sbin"
+  if [[ "${disable_python3}" == "1" ]]; then
+    run_path="${mock_bin}:/bin:/usr/sbin:/sbin"
+  fi
 
   set +e
   (
     cd "${work_dir}"
     HOME="${app_home}" \
-    PATH="${mock_bin}:/usr/bin:/bin:/usr/sbin:/sbin" \
+    PATH="${run_path}" \
     MOCK_RELEASE_METADATA_URL="${metadata_url}" \
     MOCK_RELEASE_METADATA_PATH="${resolved_metadata}" \
     MOCK_RELEASE_ASSET_URL="${asset_url}" \
@@ -184,7 +178,6 @@ EOF
     MOCK_BAD_ZIP_PATH="${bad_zip_path}" \
     MOCK_ASSET_MODE="${asset_zip_mode}" \
     MOCK_OPEN_EXIT="${open_exit}" \
-    MOCK_DISABLE_PYTHON3="${disable_python3}" \
     RELEASE_METADATA_URL="${metadata_url}" \
     RELEASE_REPO="brian-lai/litellm_token_tracker" \
     "${INSTALL_SCRIPT}"
