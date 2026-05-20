@@ -24,15 +24,28 @@ It shows today's spend in the menu bar by default and opens a compact popover fo
 - Swift 5.10+
 - A LiteLLM deployment reachable from your machine
 
-## Local Install
+## Install
 
-Install a release app bundle into `~/Applications/LiteLLMTokenTracker.app`:
+The current install path builds the app from this checkout, installs it into `~/Applications/LiteLLMTokenTracker.app`, and launches it automatically.
+
+Requirements for install:
+
+- macOS 14+
+- Xcode Command Line Tools with Swift 5.10+
+
+Install from the repository root:
 
 ```bash
 make install
 ```
 
-After that, launch it like a normal app:
+The installer script does the following:
+
+- builds `LiteLLMTokenTracker` in release mode
+- replaces any existing `~/Applications/LiteLLMTokenTracker.app`
+- launches the installed app with `open`
+
+After install, you can launch it again like a normal app:
 
 ```bash
 open ~/Applications/LiteLLMTokenTracker.app
