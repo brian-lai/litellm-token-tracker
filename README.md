@@ -26,14 +26,22 @@ It shows today's spend in the menu bar by default and opens a compact popover fo
 
 ## Install
 
-The current install path builds the app from this checkout, installs it into `~/Applications/LiteLLMTokenTracker.app`, and launches it automatically.
-
-Requirements for install:
+Requirements:
 
 - macOS 14+
 - Xcode Command Line Tools with Swift 5.10+
 
-Install from the repository root:
+### Install Latest Public Release (curl | bash)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/brian-lai/litellm-token-tracker/main/scripts/install-release.sh | bash
+```
+
+This downloads the latest `LiteLLMTokenTracker-macos.zip` GitHub release asset, installs `LiteLLMTokenTracker.app` into `~/Applications/LiteLLMTokenTracker.app`, and launches it.
+
+### Install from Local Checkout
+
+Build and install from the repository root:
 
 ```bash
 make install
@@ -52,6 +60,16 @@ open ~/Applications/LiteLLMTokenTracker.app
 ```
 
 You can also launch it from Spotlight or Finder.
+
+### Package Release Asset Locally
+
+Build the release archive expected by the installer:
+
+```bash
+bash scripts/package-release.sh
+```
+
+This produces `dist/LiteLLMTokenTracker-macos.zip`.
 
 ## Local Development
 
