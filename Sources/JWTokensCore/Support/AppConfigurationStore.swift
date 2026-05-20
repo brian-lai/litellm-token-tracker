@@ -32,14 +32,27 @@ public struct StaticAppConfigurationStore: AppConfigurationStoring {
 
 public struct LocalAppConfigurationStore: MutableAppConfigurationStoring {
     public let fileURL: URL
+    public let legacyFileURL: URL
     private let defaults: AppConfiguration
 
-    public init(fileURL: URL = LocalAppConfigurationStore.defaultFileURL(), defaults: AppConfiguration = AppConfiguration()) {
+    public init(
+        fileURL: URL = LocalAppConfigurationStore.defaultFileURL(),
+        legacyFileURL: URL = LocalAppConfigurationStore.legacyFileURL(),
+        defaults: AppConfiguration = AppConfiguration()
+    ) {
         self.fileURL = fileURL
+        self.legacyFileURL = legacyFileURL
         self.defaults = defaults
     }
 
     public static func defaultFileURL() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config", isDirectory: true)
+            .appendingPathComponent("litellm_token_tracker", isDirectory: true)
+            .appendingPathComponent("config.json", isDirectory: false)
+    }
+
+    public static func legacyFileURL() -> URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config", isDirectory: true)
             .appendingPathComponent("jw_tokens", isDirectory: true)
@@ -48,10 +61,19 @@ public struct LocalAppConfigurationStore: MutableAppConfigurationStoring {
 
     public func loadConfiguration() throws -> AppConfiguration {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            if FileManager.default.fileExists(atPath: legacyFileURL.path) {
+                let legacyConfiguration = try loadConfiguration(from: legacyFileURL)
+                try saveConfiguration(legacyConfiguration)
+                return legacyConfiguration
+            }
             return defaults
         }
+        return try loadConfiguration(from: fileURL)
+    }
+
+    private func loadConfiguration(from url: URL) throws -> AppConfiguration {
         do {
-            let data = try Data(contentsOf: fileURL)
+            let data = try Data(contentsOf: url)
             let stored = try JSONDecoder().decode(StoredConfiguration.self, from: data)
             let configuration = AppConfiguration(
                 baseURL: stored.validBaseURL ?? defaults.baseURL,

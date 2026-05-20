@@ -31,7 +31,7 @@ enum JWTokensPreviewFixtures {
     }
 
     private static func previewDefaults(metric: MenuBarMetric) -> UserDefaults {
-        let defaults = UserDefaults(suiteName: "net.justworks.jw-tokens.preview")!
+        let defaults = UserDefaults(suiteName: "net.justworks.litellm-token-tracker.preview")!
         defaults.set(metric.rawValue, forKey: UserDefaultsMenuBarPreferenceStore.metricKey)
         return defaults
     }

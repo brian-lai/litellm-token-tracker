@@ -6,7 +6,8 @@ public protocol MenuBarPreferenceStoring: Sendable {
 }
 
 public final class UserDefaultsMenuBarPreferenceStore: MenuBarPreferenceStoring, @unchecked Sendable {
-    public static let metricKey = "net.justworks.jw-tokens.menuBarMetric"
+    public static let metricKey = "net.justworks.litellm-token-tracker.menuBarMetric"
+    public static let legacyMetricKey = "net.justworks.jw-tokens.menuBarMetric"
 
     private let defaults: UserDefaults
 
@@ -17,6 +18,12 @@ public final class UserDefaultsMenuBarPreferenceStore: MenuBarPreferenceStoring,
     public func loadMetric() throws -> MenuBarMetric {
         guard let rawValue = defaults.string(forKey: Self.metricKey),
               let metric = MenuBarMetric(rawValue: rawValue) else {
+            if let legacyRawValue = defaults.string(forKey: Self.legacyMetricKey),
+               let legacyMetric = MenuBarMetric(rawValue: legacyRawValue) {
+                defaults.set(legacyMetric.rawValue, forKey: Self.metricKey)
+                defaults.removeObject(forKey: Self.legacyMetricKey)
+                return legacyMetric
+            }
             return .dollars
         }
         return metric
