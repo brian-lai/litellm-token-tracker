@@ -1,7 +1,7 @@
 import Foundation
-import JWTokensCore
+import LiteLLMTokenTrackerCore
 
-enum JWTokensPreviewFixtures {
+enum LiteLLMTokenTrackerPreviewFixtures {
     @MainActor
     static func makeViewModelFromArguments(_ arguments: [String] = CommandLine.arguments) -> SpendDashboardViewModel? {
         guard let state = previewState(from: arguments) else {
@@ -31,7 +31,7 @@ enum JWTokensPreviewFixtures {
     }
 
     private static func previewDefaults(metric: MenuBarMetric) -> UserDefaults {
-        let defaults = UserDefaults(suiteName: "net.justworks.litellm-token-tracker.preview")!
+        let defaults = UserDefaults(suiteName: "app.litellm-token-tracker.preview")!
         defaults.set(metric.rawValue, forKey: UserDefaultsMenuBarPreferenceStore.metricKey)
         return defaults
     }
@@ -56,7 +56,7 @@ struct PreviewSpendService: SpendServicing {
         case .normal:
             return .refreshed(snapshot(range: range, total: Decimal(string: "33.42")!, now: now, calendar: calendar))
         case .setup:
-            return .setupRequired(message: "LiteLLM API key is missing")
+            return .setupRequired(message: "LiteLLM configuration is missing")
         case .stale:
             return .stale(snapshot(range: range, total: 22, now: now, calendar: calendar, isStale: true), message: "Showing last known spend")
         case .authError:

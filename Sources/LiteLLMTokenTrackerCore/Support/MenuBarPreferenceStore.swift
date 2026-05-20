@@ -6,7 +6,7 @@ public protocol MenuBarPreferenceStoring: Sendable {
 }
 
 public final class UserDefaultsMenuBarPreferenceStore: MenuBarPreferenceStoring, @unchecked Sendable {
-    public static let metricKey = "net.justworks.litellm-token-tracker.menuBarMetric"
+    public static let metricKey = "app.litellm-token-tracker.menuBarMetric"
     public static let legacyMetricKey = "net.justworks.jw-tokens.menuBarMetric"
 
     private let defaults: UserDefaults

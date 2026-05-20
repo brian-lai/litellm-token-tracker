@@ -1,5 +1,5 @@
 import SwiftUI
-import JWTokensCore
+import LiteLLMTokenTrackerCore
 
 struct KeyBudgetView: View {
     let presentation: KeyBudgetPresentation

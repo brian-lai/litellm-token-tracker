@@ -1,5 +1,5 @@
 import SwiftUI
-import JWTokensCore
+import LiteLLMTokenTrackerCore
 
 struct DailySpendChartView: View {
     let presentation: DailySpendChartPresentation

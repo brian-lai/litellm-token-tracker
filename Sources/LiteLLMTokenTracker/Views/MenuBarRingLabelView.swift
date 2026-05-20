@@ -1,5 +1,5 @@
 import SwiftUI
-import JWTokensCore
+import LiteLLMTokenTrackerCore
 
 struct MenuBarRingLabelView: View {
     let presentation: MenuBarSpendPresentation

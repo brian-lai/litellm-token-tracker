@@ -3,26 +3,26 @@
 import PackageDescription
 
 let package = Package(
-    name: "JWTokens",
+    name: "LiteLLMTokenTracker",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .library(name: "JWTokensCore", targets: ["JWTokensCore"]),
-        .executable(name: "JWTokens", targets: ["JWTokens"]),
-        .executable(name: "JWTokensTests", targets: ["JWTokensTests"])
+        .library(name: "LiteLLMTokenTrackerCore", targets: ["LiteLLMTokenTrackerCore"]),
+        .executable(name: "LiteLLMTokenTracker", targets: ["LiteLLMTokenTracker"]),
+        .executable(name: "LiteLLMTokenTrackerTests", targets: ["LiteLLMTokenTrackerTests"])
     ],
     targets: [
         .target(
-            name: "JWTokensCore"
+            name: "LiteLLMTokenTrackerCore"
         ),
         .executableTarget(
-            name: "JWTokens",
-            dependencies: ["JWTokensCore"]
+            name: "LiteLLMTokenTracker",
+            dependencies: ["LiteLLMTokenTrackerCore"]
         ),
         .executableTarget(
-            name: "JWTokensTests",
-            dependencies: ["JWTokensCore"],
+            name: "LiteLLMTokenTrackerTests",
+            dependencies: ["LiteLLMTokenTrackerCore"],
             resources: [
                 .process("Fixtures")
             ]

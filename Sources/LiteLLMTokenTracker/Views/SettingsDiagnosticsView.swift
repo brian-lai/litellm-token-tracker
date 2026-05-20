@@ -1,5 +1,5 @@
 import SwiftUI
-import JWTokensCore
+import LiteLLMTokenTrackerCore
 
 struct SettingsDiagnosticsView: View {
     @Bindable var viewModel: SpendDashboardViewModel

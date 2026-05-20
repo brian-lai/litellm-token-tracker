@@ -1,9 +1,9 @@
 import SwiftUI
-import JWTokensCore
+import LiteLLMTokenTrackerCore
 
 @main
-struct JWTokensApp: App {
-    @NSApplicationDelegateAdaptor(JWTokensAppDelegate.self) private var appDelegate
+struct LiteLLMTokenTrackerApp: App {
+    @NSApplicationDelegateAdaptor(LiteLLMTokenTrackerAppDelegate.self) private var appDelegate
 
     var body: some Scene {
         Settings {
@@ -13,7 +13,7 @@ struct JWTokensApp: App {
 }
 
 @MainActor
-final class JWTokensAppDelegate: NSObject, NSApplicationDelegate {
+final class LiteLLMTokenTrackerAppDelegate: NSObject, NSApplicationDelegate {
     private var viewModel: SpendDashboardViewModel?
     private var refreshCoordinator: SpendRefreshCoordinator?
     private var statusItemController: StatusItemController?
@@ -35,7 +35,7 @@ final class JWTokensAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private static func makeViewModel() -> SpendDashboardViewModel {
-        if let previewViewModel = JWTokensPreviewFixtures.makeViewModelFromArguments() {
+        if let previewViewModel = LiteLLMTokenTrackerPreviewFixtures.makeViewModelFromArguments() {
             return previewViewModel
         }
         let apiKeyStore = EnvironmentFallbackAPIKeyStore(primary: LocalFileAPIKeyStore())

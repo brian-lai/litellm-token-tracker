@@ -42,7 +42,7 @@ public struct KeychainAPIKeyStore: APIKeyStoring {
     public let account: String
     private let gateway: KeychainGateway
 
-    public init(service: String = "net.justworks.litellm-token-tracker", account: String = "litellm-api-key", gateway: KeychainGateway = SecItemKeychainGateway()) {
+    public init(service: String = "app.litellm-token-tracker", account: String = "litellm-api-key", gateway: KeychainGateway = SecItemKeychainGateway()) {
         self.service = service
         self.account = account
         self.gateway = gateway
@@ -86,7 +86,7 @@ public struct LocalFileAPIKeyStore: APIKeyStoring {
     public static func legacyFileURL() -> URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config", isDirectory: true)
-            .appendingPathComponent("jw_tokens", isDirectory: true)
+            .appendingPathComponent("litellm_token_tracker", isDirectory: true)
             .appendingPathComponent("litellm_api_key", isDirectory: false)
     }
 

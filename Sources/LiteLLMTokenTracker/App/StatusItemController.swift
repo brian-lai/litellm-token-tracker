@@ -1,7 +1,7 @@
 import AppKit
 import Observation
 import SwiftUI
-import JWTokensCore
+import LiteLLMTokenTrackerCore
 
 @MainActor
 final class StatusItemController: NSObject {

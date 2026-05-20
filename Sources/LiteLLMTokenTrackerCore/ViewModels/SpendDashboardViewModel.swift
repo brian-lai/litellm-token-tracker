@@ -57,7 +57,8 @@ public final class SpendDashboardViewModel {
         self.menuBarMetric = (try? menuBarPreferenceStore?.loadMetric()) ?? .dollars
         let configuration = (try? configurationStore?.loadConfiguration()) ?? AppConfiguration()
         self.spendLimitDraft = NSDecimalNumber(decimal: configuration.spendLimitUSD).stringValue
-        self.baseURLDraft = configuration.baseURL.absoluteString
+        self.baseURLDraft = configuration.baseURL?.absoluteString ?? ""
+        syncSetupState(preservingCurrentError: false)
     }
 
     public func refresh(now: Date = Date(), calendar: Calendar = .current, isAutomatic: Bool = false) async {
@@ -159,6 +160,7 @@ public final class SpendDashboardViewModel {
             baseURLDraft = baseURL.absoluteString
             settingsErrorMessage = nil
             clearEndpointScopedState()
+            syncSetupState(preservingCurrentError: false)
         } catch {
             settingsErrorMessage = "Unable to save settings"
         }
@@ -173,11 +175,7 @@ public final class SpendDashboardViewModel {
             try apiKeyStore.deleteAPIKey()
             apiKeyDraft = ""
             errorMessage = "LiteLLM API key is missing"
-            requiresSetup = true
-            pausesAutomaticRefresh = true
             apiKeyDidChange()
-            requiresSetup = true
-            pausesAutomaticRefresh = true
         } catch {
             errorMessage = "Unable to clear LiteLLM API key"
         }
@@ -212,9 +210,14 @@ public final class SpendDashboardViewModel {
     }
 
     public func apiKeyDidChange() {
-        pausesAutomaticRefresh = false
-        requiresSetup = false
         clearEndpointScopedState()
+        if apiKeyStore == nil && configurationStore == nil {
+            requiresSetup = false
+            pausesAutomaticRefresh = false
+            errorMessage = nil
+            return
+        }
+        syncSetupState(preservingCurrentError: false)
     }
 
     public func saveAPIKey() {
@@ -298,5 +301,46 @@ public final class SpendDashboardViewModel {
         keyContextErrorMessage = nil
         userContext = nil
         keyContextService?.clearCache()
+    }
+
+    private func syncSetupState(preservingCurrentError: Bool = true) {
+        var hasAnyStore = false
+        var baseURLMissing = false
+        var apiKeyMissing = false
+
+        if let configurationStore {
+            hasAnyStore = true
+            baseURLMissing = (try? configurationStore.loadConfiguration().baseURL) == nil
+        }
+        if let apiKeyStore {
+            hasAnyStore = true
+            do {
+                _ = try apiKeyStore.readAPIKey()
+            } catch {
+                apiKeyMissing = true
+            }
+        }
+
+        guard hasAnyStore else {
+            return
+        }
+
+        requiresSetup = baseURLMissing || apiKeyMissing
+        pausesAutomaticRefresh = requiresSetup
+
+        guard requiresSetup else {
+            if !preservingCurrentError {
+                errorMessage = nil
+            }
+            return
+        }
+        if preservingCurrentError, let errorMessage, !errorMessage.isEmpty {
+            return
+        }
+        if baseURLMissing {
+            errorMessage = "LiteLLM base URL is missing"
+        } else if apiKeyMissing {
+            errorMessage = "LiteLLM API key is missing"
+        }
     }
 }
