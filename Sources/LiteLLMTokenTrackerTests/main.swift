@@ -2648,6 +2648,11 @@ func testStatusItemMenuActionCasesAreStable() throws {
     try expectEqual(StatusItemMenuAction.allCases, [.settings, .refresh, .exit], "status item menu action cases should stay stable")
 }
 
+func testPopoverHeaderKeepsSettingsModeAvailable() throws {
+    try expectEqual(SpendPopoverView.modeSelectorModes, [.overview, .trends, .breakdown, .keys, .settings], "popover header changes should keep Settings in the mode selector")
+    try expectEqual(PopoverHeaderAccessoryView.settingsSymbolName, "gearshape", "popover header should expose the settings cog symbol")
+}
+
 @MainActor
 func testAvailableMenuActionsExposeSettingsRefreshAndExitInOrder() throws {
     let controller = StatusItemController(viewModel: SpendDashboardViewModel(spendService: RecordingSpendService(results: [])))
@@ -2667,6 +2672,18 @@ func testRefreshMenuActionIsDisabledWhileRefreshIsRunning() throws {
     let refreshAction = try actionsByMenuAction(controller.availableMenuActions())[.refresh].unwrap("refresh action")
 
     try expect(!refreshAction.isEnabled, "refresh action should be disabled while a refresh is already running")
+}
+
+@MainActor
+func testCogOpenSettingsIsIdempotent() async throws {
+    let service = RecordingSpendService(results: [])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    await viewModel.openSettings()
+    await viewModel.openSettings()
+
+    try expectEqual(viewModel.selectedPopoverMode, .settings, "settings cog should keep settings selected when invoked repeatedly")
+    try expectEqual(service.requestedRanges, [], "settings cog should not trigger a spend refresh")
 }
 
 @MainActor
@@ -3304,6 +3321,7 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testMetricSelectorShowsDollarsAndPercentOptions", testMetricSelectorShowsDollarsAndPercentOptions),
     ("testPopoverModesExposeOverviewTrendsBreakdown", testPopoverModesExposeOverviewTrendsBreakdown),
     ("testStatusItemMenuActionCasesAreStable", testStatusItemMenuActionCasesAreStable),
+    ("testPopoverHeaderKeepsSettingsModeAvailable", testPopoverHeaderKeepsSettingsModeAvailable),
     ("testAvailableMenuActionsExposeSettingsRefreshAndExitInOrder", testAvailableMenuActionsExposeSettingsRefreshAndExitInOrder),
     ("testRefreshMenuActionIsDisabledWhileRefreshIsRunning", testRefreshMenuActionIsDisabledWhileRefreshIsRunning)
 ]
@@ -3384,6 +3402,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testDefaultPopoverModeIsOverview", testDefaultPopoverModeIsOverview),
     ("testSelectingPopoverModeDoesNotRefreshSpend", testSelectingPopoverModeDoesNotRefreshSpend),
     ("testOpenSettingsSelectsSettingsMode", testOpenSettingsSelectsSettingsMode),
+    ("testCogOpenSettingsIsIdempotent", testCogOpenSettingsIsIdempotent),
     ("testKeysModeLoadsKeyContextLazily", testKeysModeLoadsKeyContextLazily),
     ("testKeyContextUsesCachedUserIDFromAnalyticsRefresh", testKeyContextUsesCachedUserIDFromAnalyticsRefresh),
     ("testKeyContextFailurePreservesSpendSnapshot", testKeyContextFailurePreservesSpendSnapshot),
