@@ -1,4 +1,4 @@
-# JWTokens
+# LiteLLMTokenTracker
 
 Local-first macOS menu bar app for tracking LiteLLM spend.
 
@@ -8,7 +8,7 @@ Build and run the menu bar app:
 
 ```bash
 swift build
-swift run JWTokens
+swift run LiteLLMTokenTracker
 ```
 
 The menu bar indicator shows a small progress ring plus the selected label:
@@ -23,27 +23,28 @@ Use the popover's `Dollars` / `Percent` control to choose the menu bar label. Th
 Run the local test suite:
 
 ```bash
-swift run JWTokensTests
+swift run LiteLLMTokenTrackerTests
 ```
 
 ## LiteLLM API Key
 
 The local app stores the LiteLLM API key in:
 
-- `~/.config/jw_tokens/litellm_api_key`
+- `~/.config/litellm_token_tracker/litellm_api_key`
 
 The file is plaintext and should be readable only by your user account. The app creates the directory with `0700` permissions and the key file with `0600` permissions.
 
 You can set the key from the app when it shows `Set API Key`, or seed it from the terminal without using Keychain:
 
 ```bash
-mkdir -p ~/.config/jw_tokens
-chmod 700 ~/.config/jw_tokens
-printf '%s' "$LITELLM_API_KEY" > ~/.config/jw_tokens/litellm_api_key
-chmod 600 ~/.config/jw_tokens/litellm_api_key
+mkdir -p ~/.config/litellm_token_tracker
+chmod 700 ~/.config/litellm_token_tracker
+printf '%s' "$LITELLM_API_KEY" > ~/.config/litellm_token_tracker/litellm_api_key
+chmod 600 ~/.config/litellm_token_tracker/litellm_api_key
 ```
 
 The core package still includes `KeychainAPIKeyStore` for future signed/distributed builds, but the local app defaults to the file store so rebuilds do not trigger repeated Keychain access prompts.
+If `~/.config/litellm_token_tracker/` is empty but legacy `~/.config/jw_tokens/` files exist, the app migrates them automatically on first read.
 
 The default LiteLLM base URL is `https://litellm.justworksai.net`, and the default spend limit is `$80`.
 
@@ -52,15 +53,15 @@ The default LiteLLM base URL is `https://litellm.justworksai.net`, and the defau
 Preview states avoid LiteLLM and Keychain calls:
 
 ```bash
-swift run JWTokens -- --preview-state normal
-swift run JWTokens -- --preview-state setup
-swift run JWTokens -- --preview-state stale
-swift run JWTokens -- --preview-state auth_error
-swift run JWTokens -- --preview-state over_limit
-swift run JWTokens -- --preview-state empty_chart
-swift run JWTokens -- --preview-state long_model_names
-swift run JWTokens -- --preview-state fallback_source
-swift run JWTokens -- --preview-state normal --preview-metric percent
+swift run LiteLLMTokenTracker -- --preview-state normal
+swift run LiteLLMTokenTracker -- --preview-state setup
+swift run LiteLLMTokenTracker -- --preview-state stale
+swift run LiteLLMTokenTracker -- --preview-state auth_error
+swift run LiteLLMTokenTracker -- --preview-state over_limit
+swift run LiteLLMTokenTracker -- --preview-state empty_chart
+swift run LiteLLMTokenTracker -- --preview-state long_model_names
+swift run LiteLLMTokenTracker -- --preview-state fallback_source
+swift run LiteLLMTokenTracker -- --preview-state normal --preview-metric percent
 ```
 
 Checklist: status item ring and label are visible, the popover opens, the accessibility label describes spend and band, and switching dollars/percent does not clip or jitter.
@@ -80,7 +81,16 @@ The default unit suite does not call the live LiteLLM API:
 
 ```bash
 swift build
-swift run JWTokensTests
+swift run LiteLLMTokenTrackerTests
+```
+
+## Build/Test/Install Verification
+
+```bash
+swift build
+swift run LiteLLMTokenTrackerTests
+swift build -c release
+ls .build/release/LiteLLMTokenTracker
 ```
 
 To validate the live deployment without printing credentials, use the current shell's `LITELLM_API_KEY` or `OPENAI_API_KEY`:
