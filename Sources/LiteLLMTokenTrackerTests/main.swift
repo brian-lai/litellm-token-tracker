@@ -95,12 +95,25 @@ final class MutableAPIKeyStore: APIKeyStoring, @unchecked Sendable {
     }
 }
 
+final class StubReleaseUpdateChecker: ReleaseUpdateChecking, @unchecked Sendable {
+    var resultURL: URL?
+
+    init(resultURL: URL? = nil) {
+        self.resultURL = resultURL
+    }
+
+    func checkForUpdate(currentVersion: String) async -> URL? {
+        resultURL
+    }
+}
+
 @MainActor
 final class RecordingStatusItemControllerHooks {
     var primaryToggleCount = 0
     var presentedMenuSnapshots: [StatusItemMenuSnapshot] = []
     var settingsPopoverCount = 0
     var terminateCount = 0
+    var openedURLs: [URL] = []
 
     func makeController(viewModel: SpendDashboardViewModel) -> StatusItemController {
         StatusItemController(
@@ -110,7 +123,8 @@ final class RecordingStatusItemControllerHooks {
                 self.presentedMenuSnapshots.append(StatusItemMenuSnapshot(menu: menu))
             },
             settingsPopoverAction: { self.settingsPopoverCount += 1 },
-            terminateAction: { self.terminateCount += 1 }
+            terminateAction: { self.terminateCount += 1 },
+            openURLAction: { url in self.openedURLs.append(url) }
         )
     }
 }
@@ -842,6 +856,36 @@ func testFetchUserDailyActivityDoesNotLogPayloads() async throws {
 
     try expectEqual(analytics.totalSpendUSD, Decimal(string: "65.5663")!, "client should return decoded activity total")
     try expect(!String(describing: logger.events).contains("65.5663"), "logs should not include raw spend payload values")
+}
+
+func testReleaseUpdateCheckerDetectsNewerRelease() async throws {
+    let payload = """
+    {
+      "tag_name": "v9.9.9",
+      "html_url": "https://github.com/brian-lai/litellm-token-tracker/releases/tag/v9.9.9"
+    }
+    """
+    let loader = StubURLLoader(data: Data(payload.utf8), statusCode: 200)
+    let checker = GitHubReleaseUpdateChecker(repository: "brian-lai/litellm_token_tracker", loader: loader)
+
+    let result = await checker.checkForUpdate(currentVersion: "0.1.0")
+
+    try expectEqual(result?.absoluteString, "https://github.com/brian-lai/litellm-token-tracker/releases/tag/v9.9.9", "newer release should expose update URL")
+}
+
+func testReleaseUpdateCheckerIgnoresSameVersion() async throws {
+    let payload = """
+    {
+      "tag_name": "v0.1.0",
+      "html_url": "https://github.com/brian-lai/litellm-token-tracker/releases/tag/v0.1.0"
+    }
+    """
+    let loader = StubURLLoader(data: Data(payload.utf8), statusCode: 200)
+    let checker = GitHubReleaseUpdateChecker(repository: "brian-lai/litellm_token_tracker", loader: loader)
+
+    let result = await checker.checkForUpdate(currentVersion: "0.1.0")
+
+    try expectEqual(result, nil, "same release version should not show update action")
 }
 
 func testSaveReadDeleteUsesGateway() throws {
@@ -2735,7 +2779,7 @@ func testPopoverModesExposeOverviewTrendsBreakdown() throws {
 }
 
 func testStatusItemMenuActionCasesAreStable() throws {
-    try expectEqual(StatusItemMenuAction.allCases, [.settings, .refresh, .exit], "status item menu action cases should stay stable")
+    try expectEqual(StatusItemMenuAction.allCases, [.settings, .refresh, .update, .exit], "status item menu action cases should stay stable")
 }
 
 func testPopoverHeaderKeepsSettingsModeAvailable() throws {
@@ -2751,6 +2795,26 @@ func testAvailableMenuActionsExposeSettingsRefreshAndExitInOrder() throws {
 
     try expectEqual(actions.map(\.action), [.settings, .refresh, .exit], "status item menu actions should stay ordered")
     try expect(actions.allSatisfy(\.isEnabled), "status item menu actions should default to enabled")
+}
+
+@MainActor
+func testAvailableMenuActionsShowsUpdateOnlyWhenReleaseDetected() async throws {
+    guard let updateURL = URL(string: "https://github.com/brian-lai/litellm-token-tracker/releases/tag/v9.9.9") else {
+        throw TestFailure(description: "invalid update URL fixture")
+    }
+    let checker = StubReleaseUpdateChecker(resultURL: updateURL)
+    let viewModel = SpendDashboardViewModel(
+        spendService: RecordingSpendService(results: []),
+        releaseUpdateChecker: checker,
+        appVersion: "0.1.0"
+    )
+    let controller = StatusItemController(viewModel: viewModel)
+
+    try expectEqual(controller.availableMenuActions().map(\.action), [.settings, .refresh, .exit], "before detection, update action should not be shown")
+
+    await viewModel.refreshReleaseAvailability()
+
+    try expectEqual(controller.availableMenuActions().map(\.action), [.settings, .refresh, .update, .exit], "after detecting a newer release, update action should be shown before exit")
 }
 
 @MainActor
@@ -2793,6 +2857,35 @@ func testHandleSecondaryClickUsesContextMenuPath() throws {
             StatusItemMenuSnapshot.Item(title: "Exit", isSeparator: false, isEnabled: true, action: .exit)
         ],
         "secondary click should build the settings, refresh, separator, exit menu in order"
+    )
+}
+
+@MainActor
+func testHandleSecondaryClickShowsUpdateItemWhenAvailable() async throws {
+    let hooks = RecordingStatusItemControllerHooks()
+    guard let updateURL = URL(string: "https://github.com/brian-lai/litellm-token-tracker/releases/tag/v9.9.9") else {
+        throw TestFailure(description: "invalid update URL fixture")
+    }
+    let viewModel = SpendDashboardViewModel(
+        spendService: RecordingSpendService(results: []),
+        releaseUpdateChecker: StubReleaseUpdateChecker(resultURL: updateURL),
+        appVersion: "0.1.0"
+    )
+    let controller = hooks.makeController(viewModel: viewModel)
+    await viewModel.refreshReleaseAvailability()
+
+    controller.handleSecondaryClick()
+
+    try expectEqual(
+        hooks.presentedMenuSnapshots[0].items,
+        [
+            StatusItemMenuSnapshot.Item(title: "Settings", isSeparator: false, isEnabled: true, action: .settings),
+            StatusItemMenuSnapshot.Item(title: "Refresh", isSeparator: false, isEnabled: true, action: .refresh),
+            StatusItemMenuSnapshot.Item(title: "Update", isSeparator: false, isEnabled: true, action: .update),
+            StatusItemMenuSnapshot.Item(title: "", isSeparator: true, isEnabled: false, action: nil),
+            StatusItemMenuSnapshot.Item(title: "Exit", isSeparator: false, isEnabled: true, action: .exit)
+        ],
+        "secondary click should include update item only when update is available"
     )
 }
 
@@ -2844,6 +2937,25 @@ func testPerformMenuActionExitTerminatesThroughApplicationBoundary() async throw
     await controller.performMenuAction(.exit)
 
     try expectEqual(hooks.terminateCount, 1, "exit menu action should terminate through the application boundary")
+}
+
+@MainActor
+func testPerformMenuActionUpdateOpensReleaseURL() async throws {
+    let hooks = RecordingStatusItemControllerHooks()
+    guard let updateURL = URL(string: "https://github.com/brian-lai/litellm-token-tracker/releases/tag/v9.9.9") else {
+        throw TestFailure(description: "invalid update URL fixture")
+    }
+    let viewModel = SpendDashboardViewModel(
+        spendService: RecordingSpendService(results: []),
+        releaseUpdateChecker: StubReleaseUpdateChecker(resultURL: updateURL),
+        appVersion: "0.1.0"
+    )
+    let controller = hooks.makeController(viewModel: viewModel)
+    await viewModel.refreshReleaseAvailability()
+
+    await controller.performMenuAction(.update)
+
+    try expectEqual(hooks.openedURLs, [updateURL], "update menu action should open the detected release URL")
 }
 
 @MainActor
@@ -3513,6 +3625,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testRedactsAuthorizationHeaderFromLogs", testRedactsAuthorizationHeaderFromLogs),
     ("testFetchSpendRowsDoesNotComputeSnapshot", testFetchSpendRowsDoesNotComputeSnapshot),
     ("testFetchUserDailyActivityDoesNotLogPayloads", testFetchUserDailyActivityDoesNotLogPayloads),
+    ("testReleaseUpdateCheckerDetectsNewerRelease", testReleaseUpdateCheckerDetectsNewerRelease),
+    ("testReleaseUpdateCheckerIgnoresSameVersion", testReleaseUpdateCheckerIgnoresSameVersion),
     ("testKeyEndpointsMapUnauthorizedWithoutBreakingSpend", testKeyEndpointsMapUnauthorizedWithoutBreakingSpend),
     ("testKeyContextUsesStaleValueWhenAvailable", testKeyContextUsesStaleValueWhenAvailable),
     ("testKeyContextCacheExpiresAfterFiveMinutes", testKeyContextCacheExpiresAfterFiveMinutes),
@@ -3579,9 +3693,12 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testDefaultPopoverModeIsOverview", testDefaultPopoverModeIsOverview),
     ("testSelectingPopoverModeDoesNotRefreshSpend", testSelectingPopoverModeDoesNotRefreshSpend),
     ("testOpenSettingsSelectsSettingsMode", testOpenSettingsSelectsSettingsMode),
+    ("testAvailableMenuActionsShowsUpdateOnlyWhenReleaseDetected", testAvailableMenuActionsShowsUpdateOnlyWhenReleaseDetected),
     ("testPerformMenuActionSettingsOpensPopoverSettingsMode", testPerformMenuActionSettingsOpensPopoverSettingsMode),
     ("testPerformMenuActionRefreshUsesRefreshSelectedModePath", testPerformMenuActionRefreshUsesRefreshSelectedModePath),
     ("testPerformMenuActionExitTerminatesThroughApplicationBoundary", testPerformMenuActionExitTerminatesThroughApplicationBoundary),
+    ("testHandleSecondaryClickShowsUpdateItemWhenAvailable", testHandleSecondaryClickShowsUpdateItemWhenAvailable),
+    ("testPerformMenuActionUpdateOpensReleaseURL", testPerformMenuActionUpdateOpensReleaseURL),
     ("testCogOpenSettingsIsIdempotent", testCogOpenSettingsIsIdempotent),
     ("testKeysModeLoadsKeyContextLazily", testKeysModeLoadsKeyContextLazily),
     ("testKeyContextUsesCachedUserIDFromAnalyticsRefresh", testKeyContextUsesCachedUserIDFromAnalyticsRefresh),

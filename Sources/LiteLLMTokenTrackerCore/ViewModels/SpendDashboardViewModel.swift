@@ -9,6 +9,8 @@ public final class SpendDashboardViewModel {
     private let apiKeyStore: APIKeyStoring?
     private let menuBarPreferenceStore: MenuBarPreferenceStoring?
     private let configurationStore: MutableAppConfigurationStoring?
+    private let releaseUpdateChecker: ReleaseUpdateChecking?
+    private let appVersion: String
     private var endpointStateGeneration = 0
 
     public var selectedRange: SpendRange = .today
@@ -29,6 +31,7 @@ public final class SpendDashboardViewModel {
     public var baseURLDraft = ""
     public var settingsErrorMessage: String?
     public var menuBarMetric: MenuBarMetric
+    public var availableUpdateURL: URL?
 
     public var menuBarTitle: String {
         menuBarPresentation.label
@@ -47,18 +50,30 @@ public final class SpendDashboardViewModel {
         keyContextService: KeyContextServicing? = nil,
         apiKeyStore: APIKeyStoring? = nil,
         menuBarPreferenceStore: MenuBarPreferenceStoring? = nil,
-        configurationStore: MutableAppConfigurationStoring? = nil
+        configurationStore: MutableAppConfigurationStoring? = nil,
+        releaseUpdateChecker: ReleaseUpdateChecking? = nil,
+        appVersion: String = "0.0.0"
     ) {
         self.spendService = spendService
         self.keyContextService = keyContextService
         self.apiKeyStore = apiKeyStore
         self.menuBarPreferenceStore = menuBarPreferenceStore
         self.configurationStore = configurationStore
+        self.releaseUpdateChecker = releaseUpdateChecker
+        self.appVersion = appVersion
         self.menuBarMetric = (try? menuBarPreferenceStore?.loadMetric()) ?? .dollars
         let configuration = (try? configurationStore?.loadConfiguration()) ?? AppConfiguration()
         self.spendLimitDraft = NSDecimalNumber(decimal: configuration.spendLimitUSD).stringValue
         self.baseURLDraft = configuration.baseURL?.absoluteString ?? ""
         syncSetupState(preservingCurrentError: false)
+    }
+
+    public func refreshReleaseAvailability() async {
+        guard let releaseUpdateChecker else {
+            availableUpdateURL = nil
+            return
+        }
+        availableUpdateURL = await releaseUpdateChecker.checkForUpdate(currentVersion: appVersion)
     }
 
     public func refresh(now: Date = Date(), calendar: Calendar = .current, isAutomatic: Bool = false) async {

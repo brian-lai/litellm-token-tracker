@@ -31,6 +31,7 @@ final class LiteLLMTokenTrackerAppDelegate: NSObject, NSApplicationDelegate {
 
         coordinator.start()
         Task {
+            await viewModel.refreshReleaseAvailability()
             await viewModel.refresh()
         }
     }
@@ -39,6 +40,7 @@ final class LiteLLMTokenTrackerAppDelegate: NSObject, NSApplicationDelegate {
         if let previewViewModel = LiteLLMTokenTrackerPreviewFixtures.makeViewModelFromArguments() {
             return previewViewModel
         }
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
         let apiKeyStore = EnvironmentFallbackAPIKeyStore(primary: LocalFileAPIKeyStore())
         let configurationStore = LocalAppConfigurationStore()
         return SpendDashboardViewModel(
@@ -58,7 +60,9 @@ final class LiteLLMTokenTrackerAppDelegate: NSObject, NSApplicationDelegate {
             ),
             apiKeyStore: apiKeyStore,
             menuBarPreferenceStore: UserDefaultsMenuBarPreferenceStore(),
-            configurationStore: configurationStore
+            configurationStore: configurationStore,
+            releaseUpdateChecker: GitHubReleaseUpdateChecker(),
+            appVersion: appVersion
         )
     }
 }

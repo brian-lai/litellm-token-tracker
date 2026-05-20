@@ -3,6 +3,7 @@ import Foundation
 enum StatusItemMenuAction: String, CaseIterable {
     case settings
     case refresh
+    case update
     case exit
 
     var menuTitle: String {
@@ -11,6 +12,8 @@ enum StatusItemMenuAction: String, CaseIterable {
             return "Settings"
         case .refresh:
             return "Refresh"
+        case .update:
+            return "Update"
         case .exit:
             return "Exit"
         }
