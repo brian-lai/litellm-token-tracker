@@ -9,7 +9,7 @@ public enum MenuBarTitleFormatter {
     }
 
     public static func setupTitle() -> String {
-        "Set API Key"
+        "Configure"
     }
 
     public static func currency(_ value: Decimal) -> String {

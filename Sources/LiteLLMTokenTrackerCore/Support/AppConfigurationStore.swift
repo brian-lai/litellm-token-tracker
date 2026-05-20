@@ -1,10 +1,10 @@
 import Foundation
 
 public struct AppConfiguration: Equatable, Sendable {
-    public let baseURL: URL
+    public let baseURL: URL?
     public let spendLimitUSD: Decimal
 
-    public init(baseURL: URL = URL(string: "https://litellm.justworksai.net")!, spendLimitUSD: Decimal = 80) {
+    public init(baseURL: URL? = nil, spendLimitUSD: Decimal = 80) {
         self.baseURL = baseURL
         self.spendLimitUSD = spendLimitUSD
     }
@@ -21,7 +21,7 @@ public protocol MutableAppConfigurationStoring: AppConfigurationStoring {
 public struct StaticAppConfigurationStore: AppConfigurationStoring {
     private let configuration: AppConfiguration
 
-    public init(configuration: AppConfiguration = AppConfiguration()) {
+    public init(configuration: AppConfiguration = AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!)) {
         self.configuration = configuration
     }
 
@@ -32,26 +32,58 @@ public struct StaticAppConfigurationStore: AppConfigurationStoring {
 
 public struct LocalAppConfigurationStore: MutableAppConfigurationStoring {
     public let fileURL: URL
+    public let legacyFileURL: URL
     private let defaults: AppConfiguration
+    private let environment: EnvironmentValueProviding
+    private let environmentKey: String
 
-    public init(fileURL: URL = LocalAppConfigurationStore.defaultFileURL(), defaults: AppConfiguration = AppConfiguration()) {
+    public init(
+        fileURL: URL = LocalAppConfigurationStore.defaultFileURL(),
+        legacyFileURL: URL = LocalAppConfigurationStore.legacyFileURL(),
+        defaults: AppConfiguration = AppConfiguration(),
+        environment: EnvironmentValueProviding = ProcessEnvironmentProvider(),
+        environmentKey: String = "LITELLM_BASE_URL"
+    ) {
         self.fileURL = fileURL
+        self.legacyFileURL = legacyFileURL
         self.defaults = defaults
+        self.environment = environment
+        self.environmentKey = environmentKey
     }
 
     public static func defaultFileURL() -> URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config", isDirectory: true)
-            .appendingPathComponent("jw_tokens", isDirectory: true)
+            .appendingPathComponent("litellm_token_tracker", isDirectory: true)
+            .appendingPathComponent("config.json", isDirectory: false)
+    }
+
+    public static func legacyFileURL() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config", isDirectory: true)
+            .appendingPathComponent("litellm_token_tracker", isDirectory: true)
             .appendingPathComponent("config.json", isDirectory: false)
     }
 
     public func loadConfiguration() throws -> AppConfiguration {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            if FileManager.default.fileExists(atPath: legacyFileURL.path) {
+                let legacyConfiguration = try loadConfiguration(from: legacyFileURL)
+                try saveConfiguration(legacyConfiguration)
+                return legacyConfiguration
+            }
+            if let environmentConfiguration = configurationFromEnvironment() {
+                try saveConfiguration(environmentConfiguration)
+                return environmentConfiguration
+            }
             return defaults
         }
+        return try loadConfiguration(from: fileURL)
+    }
+
+    private func loadConfiguration(from url: URL) throws -> AppConfiguration {
         do {
-            let data = try Data(contentsOf: fileURL)
+            let data = try Data(contentsOf: url)
             let stored = try JSONDecoder().decode(StoredConfiguration.self, from: data)
             let configuration = AppConfiguration(
                 baseURL: stored.validBaseURL ?? defaults.baseURL,
@@ -74,7 +106,7 @@ public struct LocalAppConfigurationStore: MutableAppConfigurationStoring {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
             let stored = StoredConfiguration(
-                baseURL: configuration.baseURL.normalizedForConfiguration?.absoluteString ?? defaults.baseURL.absoluteString,
+                baseURL: configuration.baseURL?.normalizedForConfiguration?.absoluteString,
                 spendLimitUSD: NSDecimalNumber(decimal: configuration.spendLimitUSD).stringValue
             )
             let data = try JSONEncoder().encode(stored)
@@ -83,6 +115,15 @@ public struct LocalAppConfigurationStore: MutableAppConfigurationStoring {
         } catch {
             throw AppConfigurationStoreError.unavailable
         }
+    }
+
+    private func configurationFromEnvironment() -> AppConfiguration? {
+        guard let value = environment.value(for: environmentKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              let baseURL = URL(string: value)?.normalizedForConfiguration else {
+            return nil
+        }
+        return AppConfiguration(baseURL: baseURL, spendLimitUSD: defaults.spendLimitUSD)
     }
 }
 
@@ -109,7 +150,7 @@ private struct StoredConfiguration: Codable {
     }
 
     func needsNormalization(comparedTo configuration: AppConfiguration) -> Bool {
-        baseURL != configuration.baseURL.absoluteString || spendLimitUSD != NSDecimalNumber(decimal: configuration.spendLimitUSD).stringValue
+        baseURL != configuration.baseURL?.absoluteString || spendLimitUSD != NSDecimalNumber(decimal: configuration.spendLimitUSD).stringValue
     }
 }
 

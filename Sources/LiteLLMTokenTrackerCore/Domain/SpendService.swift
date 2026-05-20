@@ -26,9 +26,12 @@ public struct SpendService: SpendServicing {
         do {
             let apiKey = try apiKeyStore.readAPIKey()
             let configuration = try configurationStore.loadConfiguration()
-            let scope = cacheScope(baseURL: configuration.baseURL, apiKey: apiKey)
+            guard let baseURL = configuration.baseURL else {
+                return .setupRequired(message: "LiteLLM base URL is missing")
+            }
+            let scope = cacheScope(baseURL: baseURL, apiKey: apiKey)
             currentScope = scope
-            let client = clientFactory(configuration.baseURL, apiKey)
+            let client = clientFactory(baseURL, apiKey)
             let user = try await client.fetchCurrentUser()
             let dateRange = rangeResolver.dateRange(for: range, now: now, calendar: calendar)
             let snapshot: SpendSnapshot

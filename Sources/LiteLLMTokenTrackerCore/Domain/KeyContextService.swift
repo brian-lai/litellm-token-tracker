@@ -63,12 +63,15 @@ public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
         do {
             let apiKey = try apiKeyStore.readAPIKey()
             let configuration = try configurationStore.loadConfiguration()
-            let scope = cacheScope(baseURL: configuration.baseURL, apiKey: apiKey)
+            guard let baseURL = configuration.baseURL else {
+                return .failed(message: "LiteLLM base URL is missing")
+            }
+            let scope = cacheScope(baseURL: baseURL, apiKey: apiKey)
             currentScope = scope
             if !bypassingCache, let cached = loadFreshCache(now: now, scope: scope) {
                 return .refreshed(cached)
             }
-            let client = clientFactory(configuration.baseURL, apiKey)
+            let client = clientFactory(baseURL, apiKey)
             let user = try await resolvedUserContext(userContext, client: client, scope: scope)
             let currentKey = try await client.fetchCurrentKey()
             let ownedKeys = try await client.fetchUserKeys(userID: user.userID)

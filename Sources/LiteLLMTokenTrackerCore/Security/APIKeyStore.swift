@@ -42,7 +42,7 @@ public struct KeychainAPIKeyStore: APIKeyStoring {
     public let account: String
     private let gateway: KeychainGateway
 
-    public init(service: String = "net.justworks.jw-tokens", account: String = "litellm-api-key", gateway: KeychainGateway = SecItemKeychainGateway()) {
+    public init(service: String = "app.litellm-token-tracker", account: String = "litellm-api-key", gateway: KeychainGateway = SecItemKeychainGateway()) {
         self.service = service
         self.account = account
         self.gateway = gateway
@@ -66,24 +66,45 @@ public struct KeychainAPIKeyStore: APIKeyStoring {
 
 public struct LocalFileAPIKeyStore: APIKeyStoring {
     public let fileURL: URL
+    public let legacyFileURL: URL
 
-    public init(fileURL: URL = LocalFileAPIKeyStore.defaultFileURL()) {
+    public init(
+        fileURL: URL = LocalFileAPIKeyStore.defaultFileURL(),
+        legacyFileURL: URL = LocalFileAPIKeyStore.legacyFileURL()
+    ) {
         self.fileURL = fileURL
+        self.legacyFileURL = legacyFileURL
     }
 
     public static func defaultFileURL() -> URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config", isDirectory: true)
-            .appendingPathComponent("jw_tokens", isDirectory: true)
+            .appendingPathComponent("litellm_token_tracker", isDirectory: true)
+            .appendingPathComponent("litellm_api_key", isDirectory: false)
+    }
+
+    public static func legacyFileURL() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config", isDirectory: true)
+            .appendingPathComponent("litellm_token_tracker", isDirectory: true)
             .appendingPathComponent("litellm_api_key", isDirectory: false)
     }
 
     public func readAPIKey() throws -> String {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            if FileManager.default.fileExists(atPath: legacyFileURL.path) {
+                let legacyValue = try readAPIKey(from: legacyFileURL)
+                try saveAPIKey(legacyValue)
+                return legacyValue
+            }
             throw APIKeyStoreError.missingKey
         }
+        return try readAPIKey(from: fileURL)
+    }
+
+    private func readAPIKey(from url: URL) throws -> String {
         do {
-            let value = try String(contentsOf: fileURL, encoding: .utf8)
+            let value = try String(contentsOf: url, encoding: .utf8)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty else {
                 throw APIKeyStoreError.missingKey

@@ -50,7 +50,7 @@ public struct RingProgressPresentation: Equatable, Sendable {
                 progress: 0,
                 band: .green,
                 label: MenuBarTitleFormatter.setupTitle(),
-                accessibilityLabel: "LiteLLM API key setup required"
+                accessibilityLabel: "LiteLLM configuration required"
             )
         }
         guard let snapshot else {

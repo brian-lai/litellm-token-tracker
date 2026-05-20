@@ -1,5 +1,5 @@
 import SwiftUI
-import JWTokensCore
+import LiteLLMTokenTrackerCore
 
 struct TrendView: View {
     let presentation: TrendPresentation

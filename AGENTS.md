@@ -1,4 +1,4 @@
-# jw_tokens
+# litellm_token_tracker
 
 > **Workflow Methodology:** Follow `~/.agents/AGENTS.md`
 

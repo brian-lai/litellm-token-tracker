@@ -1,5 +1,5 @@
 import SwiftUI
-import JWTokensCore
+import LiteLLMTokenTrackerCore
 
 struct SpendPopoverView: View {
     @Bindable var viewModel: SpendDashboardViewModel
@@ -85,12 +85,21 @@ struct SpendPopoverView: View {
             }
             .disabled(viewModel.isRefreshing || viewModel.isKeyContextRefreshing)
             if presentation.showsKeyUpdateAction {
-                SecureField("LiteLLM API key", text: $viewModel.apiKeyDraft)
-                    .textFieldStyle(.roundedBorder)
-                Button("Save API Key") {
-                    viewModel.saveAPIKey()
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("LiteLLM Base URL", text: $viewModel.baseURLDraft)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Save Base URL") {
+                        viewModel.saveBaseURL()
+                    }
+                    .disabled(viewModel.baseURLDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    SecureField("LiteLLM API key", text: $viewModel.apiKeyDraft)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Save API Key") {
+                        viewModel.saveAPIKey()
+                    }
+                    .disabled(viewModel.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                .disabled(viewModel.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .frame(width: 340, alignment: .leading)

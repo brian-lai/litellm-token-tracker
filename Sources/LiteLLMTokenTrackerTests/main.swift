@@ -1,5 +1,5 @@
 import Foundation
-import JWTokensCore
+import LiteLLMTokenTrackerCore
 
 struct TestFailure: Error, CustomStringConvertible {
     let description: String
@@ -665,7 +665,7 @@ func testDropsExclusiveEndDateRowsFromDailyPoints() throws {
 
 func testUserInfoRequestUsesAuthorizationBearer() async throws {
     let loader = StubURLLoader(data: try fixtureData("user-info.json"))
-    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.example.internal")!, apiKey: "secret-token", loader: loader)
 
     _ = try await client.fetchCurrentUser()
 
@@ -675,7 +675,7 @@ func testUserInfoRequestUsesAuthorizationBearer() async throws {
 
 func testSpendLogsRequestUsesSummarizeTrueAndExclusiveEndDate() async throws {
     let loader = StubURLLoader(data: try fixtureData("spend-logs-summary.json"))
-    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.example.internal")!, apiKey: "secret-token", loader: loader)
     let range = try utcDateRange()
 
     _ = try await client.fetchSpendRows(range: range, userID: "user-123")
@@ -690,7 +690,7 @@ func testSpendLogsRequestUsesSummarizeTrueAndExclusiveEndDate() async throws {
 
 func testKeyInfoRequestUsesCurrentKeyByDefault() async throws {
     let loader = StubURLLoader(data: try fixtureData("key-info.json"))
-    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.example.internal")!, apiKey: "secret-token", loader: loader)
 
     _ = try await client.fetchCurrentKey()
 
@@ -700,7 +700,7 @@ func testKeyInfoRequestUsesCurrentKeyByDefault() async throws {
 
 func testKeyListRequestFiltersByUserID() async throws {
     let loader = StubURLLoader(data: try fixtureData("key-list.json"))
-    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.example.internal")!, apiKey: "secret-token", loader: loader)
 
     _ = try await client.fetchUserKeys(userID: "user-123")
 
@@ -713,7 +713,7 @@ func testKeyListRequestFiltersByUserID() async throws {
 
 func testKeyListRequestDoesNotRequestFullObjects() async throws {
     let loader = StubURLLoader(data: try fixtureData("key-list.json"))
-    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.example.internal")!, apiKey: "secret-token", loader: loader)
 
     _ = try await client.fetchUserKeys(userID: "user-123")
 
@@ -724,7 +724,7 @@ func testKeyListRequestDoesNotRequestFullObjects() async throws {
 
 func testUserDailyActivityRequestUsesInclusiveEndDateAndTimezone() async throws {
     let loader = StubURLLoader(data: try fixtureData("user-daily-activity.json"))
-    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.example.internal")!, apiKey: "secret-token", loader: loader)
     let timeZone = TimeZone(identifier: "America/New_York")!
     let range = DateRange(
         startDate: try fixedDate("2026-05-18", timeZone: timeZone),
@@ -746,7 +746,7 @@ func testUserDailyActivityRequestUsesInclusiveEndDateAndTimezone() async throws 
 
 func testMapsUnauthorized() async throws {
     let loader = StubURLLoader(data: Data(#"{"error":"no"}"#.utf8), statusCode: 401)
-    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.example.internal")!, apiKey: "secret-token", loader: loader)
 
     do {
         _ = try await client.fetchCurrentUser()
@@ -758,7 +758,7 @@ func testMapsUnauthorized() async throws {
 
 func testMapsFullyInvalidJSONToMalformedResponse() async throws {
     let loader = StubURLLoader(data: Data(#"{"not":"array"}"#.utf8), statusCode: 200)
-    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.example.internal")!, apiKey: "secret-token", loader: loader)
     let range = try utcDateRange()
 
     do {
@@ -772,7 +772,7 @@ func testMapsFullyInvalidJSONToMalformedResponse() async throws {
 func testRedactsAuthorizationHeaderFromLogs() async throws {
     let logger = CapturingLogger()
     let loader = StubURLLoader(data: try fixtureData("user-info.json"))
-    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader, logger: logger)
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.example.internal")!, apiKey: "secret-token", loader: loader, logger: logger)
 
     _ = try await client.fetchCurrentUser()
 
@@ -782,7 +782,7 @@ func testRedactsAuthorizationHeaderFromLogs() async throws {
 
 func testFetchSpendRowsDoesNotComputeSnapshot() async throws {
     let loader = StubURLLoader(data: try fixtureData("spend-logs-summary.json"))
-    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader)
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.example.internal")!, apiKey: "secret-token", loader: loader)
     let range = try utcDateRange()
 
     let rows = try await client.fetchSpendRows(range: range, userID: "user-123")
@@ -793,7 +793,7 @@ func testFetchSpendRowsDoesNotComputeSnapshot() async throws {
 func testFetchUserDailyActivityDoesNotLogPayloads() async throws {
     let logger = CapturingLogger()
     let loader = StubURLLoader(data: try fixtureData("user-daily-activity.json"))
-    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.justworksai.net")!, apiKey: "secret-token", loader: loader, logger: logger)
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.example.internal")!, apiKey: "secret-token", loader: loader, logger: logger)
     let analytics = try await client.fetchUserDailyActivity(range: try utcDateRange(), userID: "user-123")
 
     try expectEqual(analytics.totalSpendUSD, Decimal(string: "65.5663")!, "client should return decoded activity total")
@@ -829,7 +829,7 @@ func testMissingKeyMapsToSetupRequired() throws {
 
 func testLocalFileAPIKeyStoreSaveReadDelete() throws {
     let fileURL = temporaryAPIKeyFileURL()
-    let store = LocalFileAPIKeyStore(fileURL: fileURL)
+    let store = LocalFileAPIKeyStore(fileURL: fileURL, legacyFileURL: temporaryAPIKeyFileURL(namespace: "litellm_token_tracker_tests_unused"))
 
     try store.saveAPIKey("secret-token\n")
     try expectEqual(try store.readAPIKey(), "secret-token", "file store should trim surrounding newlines")
@@ -844,7 +844,10 @@ func testLocalFileAPIKeyStoreSaveReadDelete() throws {
 }
 
 func testLocalFileAPIKeyStoreMissingFileMapsToMissingKey() throws {
-    let store = LocalFileAPIKeyStore(fileURL: temporaryAPIKeyFileURL())
+    let store = LocalFileAPIKeyStore(
+        fileURL: temporaryAPIKeyFileURL(),
+        legacyFileURL: temporaryAPIKeyFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
 
     do {
         _ = try store.readAPIKey()
@@ -856,7 +859,7 @@ func testLocalFileAPIKeyStoreMissingFileMapsToMissingKey() throws {
 
 func testLocalFileAPIKeyStoreUsesPrivatePermissions() throws {
     let fileURL = temporaryAPIKeyFileURL()
-    let store = LocalFileAPIKeyStore(fileURL: fileURL)
+    let store = LocalFileAPIKeyStore(fileURL: fileURL, legacyFileURL: temporaryAPIKeyFileURL(namespace: "litellm_token_tracker_tests_unused"))
 
     try store.saveAPIKey("secret-token")
 
@@ -864,6 +867,25 @@ func testLocalFileAPIKeyStoreUsesPrivatePermissions() throws {
     let filePermissions = try permissions(at: fileURL)
     try expectEqual(directoryPermissions, 0o700, "credential directory should be private")
     try expectEqual(filePermissions, 0o600, "credential file should be private")
+}
+
+func testLocalFileAPIKeyStoreDefaultPathUsesRenamedNamespace() throws {
+    let path = LocalFileAPIKeyStore.defaultFileURL().path
+
+    try expect(path.contains("/.config/litellm_token_tracker/"), "default key path should use renamed namespace")
+}
+
+func testLocalFileAPIKeyStoreMigratesLegacyPath() throws {
+    let newFileURL = temporaryAPIKeyFileURL(namespace: "litellm_token_tracker_tests")
+    let legacyFileURL = temporaryAPIKeyFileURL(namespace: "litellm_token_tracker_tests_legacy")
+    try FileManager.default.createDirectory(at: legacyFileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data("legacy-token\n".utf8).write(to: legacyFileURL)
+    let store = LocalFileAPIKeyStore(fileURL: newFileURL, legacyFileURL: legacyFileURL)
+
+    let value = try store.readAPIKey()
+
+    try expectEqual(value, "legacy-token", "file store should read legacy token during migration")
+    try expectEqual(try String(contentsOf: newFileURL, encoding: .utf8), "legacy-token", "file store should persist migrated token to renamed path")
 }
 
 func testEnvironmentFallbackUsesPersistedKeyFirst() throws {
@@ -912,16 +934,16 @@ func testEnvironmentFallbackTrimsEnvValue() throws {
     try expectEqual(primary.savedKeys, ["env-token"], "environment fallback should persist trimmed env values")
 }
 
-func temporaryAPIKeyFileURL() -> URL {
+func temporaryAPIKeyFileURL(namespace: String = "litellm_token_tracker_tests") -> URL {
     FileManager.default.temporaryDirectory
-        .appendingPathComponent("jw_tokens_tests", isDirectory: true)
+        .appendingPathComponent(namespace, isDirectory: true)
         .appendingPathComponent(UUID().uuidString, isDirectory: true)
         .appendingPathComponent("litellm_api_key", isDirectory: false)
 }
 
-func temporaryConfigurationFileURL() -> URL {
+func temporaryConfigurationFileURL(namespace: String = "litellm_token_tracker_tests") -> URL {
     FileManager.default.temporaryDirectory
-        .appendingPathComponent("jw_tokens_tests", isDirectory: true)
+        .appendingPathComponent(namespace, isDirectory: true)
         .appendingPathComponent(UUID().uuidString, isDirectory: true)
         .appendingPathComponent("config.json", isDirectory: false)
 }
@@ -942,7 +964,7 @@ func testDoesNotExposeKeyInErrorDescription() throws {
 
 func testConfigurationStorePersistsSpendLimit() throws {
     let fileURL = temporaryConfigurationFileURL()
-    let store = LocalAppConfigurationStore(fileURL: fileURL)
+    let store = LocalAppConfigurationStore(fileURL: fileURL, legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused"))
 
     try store.saveConfiguration(AppConfiguration(spendLimitUSD: 125))
     let configuration = try store.loadConfiguration()
@@ -953,7 +975,7 @@ func testConfigurationStorePersistsSpendLimit() throws {
 
 func testConfigurationStorePersistsBaseURL() throws {
     let fileURL = temporaryConfigurationFileURL()
-    let store = LocalAppConfigurationStore(fileURL: fileURL)
+    let store = LocalAppConfigurationStore(fileURL: fileURL, legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused"))
     let baseURL = URL(string: "https://litellm.example.internal")!
 
     try store.saveConfiguration(AppConfiguration(baseURL: baseURL, spendLimitUSD: 80))
@@ -966,8 +988,8 @@ func testConfigurationStoreFallsBackOnInvalidValues() throws {
     let fileURL = temporaryConfigurationFileURL()
     try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
     try Data(#"{"baseURL":"not-a-url","spendLimitUSD":"-1"}"#.utf8).write(to: fileURL)
-    let defaults = AppConfiguration(baseURL: URL(string: "https://litellm.justworksai.net")!, spendLimitUSD: 80)
-    let store = LocalAppConfigurationStore(fileURL: fileURL, defaults: defaults)
+    let defaults = AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80)
+    let store = LocalAppConfigurationStore(fileURL: fileURL, legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused"), defaults: defaults)
 
     let configuration = try store.loadConfiguration()
 
@@ -978,8 +1000,8 @@ func testConfigurationStoreRejectsNonHTTPSchemes() throws {
     let fileURL = temporaryConfigurationFileURL()
     try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
     try Data(#"{"baseURL":"httpx://litellm.example.internal","spendLimitUSD":"40"}"#.utf8).write(to: fileURL)
-    let defaults = AppConfiguration(baseURL: URL(string: "https://litellm.justworksai.net")!, spendLimitUSD: 80)
-    let store = LocalAppConfigurationStore(fileURL: fileURL, defaults: defaults)
+    let defaults = AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80)
+    let store = LocalAppConfigurationStore(fileURL: fileURL, legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused"), defaults: defaults)
 
     let configuration = try store.loadConfiguration()
 
@@ -989,14 +1011,14 @@ func testConfigurationStoreRejectsNonHTTPSchemes() throws {
 
 func testConfigurationStoreNormalizesSecretBearingBaseURLOnSave() throws {
     let fileURL = temporaryConfigurationFileURL()
-    let store = LocalAppConfigurationStore(fileURL: fileURL)
+    let store = LocalAppConfigurationStore(fileURL: fileURL, legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused"))
     let secretURL = URL(string: "https://user:secret-token@litellm.example.internal/v1?api_key=sk-should-not-display#token")!
 
     try store.saveConfiguration(AppConfiguration(baseURL: secretURL, spendLimitUSD: 80))
     let rawConfig = try String(contentsOf: fileURL, encoding: .utf8)
     let configuration = try store.loadConfiguration()
 
-    try expectEqual(configuration.baseURL.absoluteString, "https://litellm.example.internal/v1", "configuration store should normalize secret-bearing base URLs")
+    try expectEqual(configuration.baseURL?.absoluteString, "https://litellm.example.internal/v1", "configuration store should normalize secret-bearing base URLs")
     try expect(!rawConfig.contains("secret-token"), "configuration file should not persist URL userinfo secrets")
     try expect(!rawConfig.contains("sk-should-not-display"), "configuration file should not persist URL query secrets")
 }
@@ -1005,21 +1027,58 @@ func testConfigurationStoreNormalizesSecretBearingBaseURLOnLoad() throws {
     let fileURL = temporaryConfigurationFileURL()
     try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
     try Data(#"{"baseURL":"https://user:secret-token@litellm.example.internal/v1?api_key=sk-should-not-display#token","spendLimitUSD":"80"}"#.utf8).write(to: fileURL)
-    let store = LocalAppConfigurationStore(fileURL: fileURL)
+    let store = LocalAppConfigurationStore(fileURL: fileURL, legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused"))
 
     let configuration = try store.loadConfiguration()
     let rawConfig = try String(contentsOf: fileURL, encoding: .utf8)
 
-    try expectEqual(configuration.baseURL.absoluteString, "https://litellm.example.internal/v1", "configuration store should normalize existing secret-bearing base URLs")
+    try expectEqual(configuration.baseURL?.absoluteString, "https://litellm.example.internal/v1", "configuration store should normalize existing secret-bearing base URLs")
     try expect(!rawConfig.contains("secret-token"), "configuration load should scrub existing URL userinfo secrets from disk")
     try expect(!rawConfig.contains("sk-should-not-display"), "configuration load should scrub existing URL query secrets from disk")
+}
+
+func testConfigurationStoreDefaultPathUsesRenamedNamespace() throws {
+    let path = LocalAppConfigurationStore.defaultFileURL().path
+
+    try expect(path.contains("/.config/litellm_token_tracker/"), "default config path should use renamed namespace")
+}
+
+func testConfigurationStoreMigratesLegacyPath() throws {
+    let newFileURL = temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests")
+    let legacyFileURL = temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_legacy")
+    try FileManager.default.createDirectory(at: legacyFileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"baseURL":"https://litellm.example.internal","spendLimitUSD":"125"}"#.utf8).write(to: legacyFileURL)
+    let store = LocalAppConfigurationStore(fileURL: newFileURL, legacyFileURL: legacyFileURL)
+
+    let configuration = try store.loadConfiguration()
+    let migrated = try String(contentsOf: newFileURL, encoding: .utf8)
+
+    try expectEqual(configuration.baseURL?.absoluteString, "https://litellm.example.internal", "configuration store should load legacy base URL during migration")
+    try expectEqual(configuration.spendLimitUSD, 125, "configuration store should load legacy spend limit during migration")
+    try expect(migrated.contains("litellm.example.internal"), "configuration store should persist migrated config to renamed path")
+}
+
+func testConfigurationStorePersistsEnvironmentBaseURLWhenFileMissing() throws {
+    let fileURL = temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_env")
+    let store = LocalAppConfigurationStore(
+        fileURL: fileURL,
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused"),
+        environment: FakeEnvironmentProvider(values: ["LITELLM_BASE_URL": " https://litellm.env.internal/v1?api_key=secret \n"])
+    )
+
+    let configuration = try store.loadConfiguration()
+    let persisted = try String(contentsOf: fileURL, encoding: .utf8)
+
+    try expectEqual(configuration.baseURL?.absoluteString, "https://litellm.env.internal/v1", "configuration store should load normalized env base URL")
+    try expect(persisted.contains("litellm.env.internal"), "configuration store should persist env-provided base URL")
+    try expect(!persisted.contains("secret"), "configuration store should not persist env query secrets")
 }
 
 func testRefreshFetchesUserThenTodaySpend() async throws {
     let cache = InMemorySpendSnapshotCache()
     let service = SpendService(
         apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
-        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(spendLimitUSD: 80)),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80)),
         clientFactory: { _, _ in
             FakeClient(
                 userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 100, maxBudgetUSD: nil, budgetResetAt: nil)),
@@ -1047,7 +1106,7 @@ func testRefreshPrefersDailyActivitySummary() async throws {
     )
     let service = SpendService(
         apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
-        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(spendLimitUSD: 80)),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80)),
         clientFactory: { _, _ in
             FakeClient(
                 userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 100, maxBudgetUSD: nil, budgetResetAt: nil)),
@@ -1093,7 +1152,7 @@ func testRefreshMarksActivitySource() async throws {
 func testRefreshFallsBackToSpendLogsWhenDailyActivityUnavailable() async throws {
     let service = SpendService(
         apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
-        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(spendLimitUSD: 80)),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80)),
         clientFactory: { _, _ in
             FakeClient(
                 userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 100, maxBudgetUSD: nil, budgetResetAt: nil)),
@@ -1154,7 +1213,7 @@ func testFallbackAnalyticsHasEmptyBreakdowns() async throws {
 func testRefreshFallsBackToSpendLogsWhenDailyActivityIsUnauthorized() async throws {
     let service = SpendService(
         apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
-        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(spendLimitUSD: 80)),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80)),
         clientFactory: { _, _ in
             FakeClient(
                 userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 100, maxBudgetUSD: nil, budgetResetAt: nil)),
@@ -1220,7 +1279,10 @@ func testSpendServiceStaleCacheIsScopedByCredential() async throws {
 }
 
 func testSpendServiceStaleCacheIsScopedByBaseURL() async throws {
-    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
     try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://first.example.internal")!, spendLimitUSD: 80))
     let firstClient = FakeClient(
         userResult: .success(LiteLLMUserContext(userID: "first-user", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
@@ -1283,6 +1345,26 @@ func testMissingKeyReturnsSetupRequired() async throws {
     }
 }
 
+func testMissingBaseURLReturnsSetupRequired() async throws {
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: nil, spendLimitUSD: 80)),
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .failure(LiteLLMClientError.unavailable),
+                rowsResult: .success([])
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .setupRequired(message) = result else {
+        throw TestFailure(description: "missing base URL should require setup")
+    }
+    try expectEqual(message, "LiteLLM base URL is missing", "service should surface missing base URL distinctly")
+}
+
 func testMalformedResponseWithoutCacheReturnsFailed() async throws {
     let service = SpendService(
         apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
@@ -1304,7 +1386,7 @@ func testMalformedResponseWithoutCacheReturnsFailed() async throws {
 func testUsesConfiguredSpendLimit() async throws {
     let service = SpendService(
         apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
-        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(spendLimitUSD: 40)),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 40)),
         clientFactory: { _, _ in
             FakeClient(
                 userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
@@ -1323,8 +1405,11 @@ func testUsesConfiguredSpendLimit() async throws {
 }
 
 func testSpendServiceUsesPersistedSpendLimit() async throws {
-    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
-    try configurationStore.saveConfiguration(AppConfiguration(spendLimitUSD: 40))
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 40))
     let service = SpendService(
         apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
         configurationStore: configurationStore,
@@ -1347,7 +1432,10 @@ func testSpendServiceUsesPersistedSpendLimit() async throws {
 
 func testMissingPersistedKeyUsesEnvironmentFallbackForSpendService() async throws {
     let fileURL = temporaryAPIKeyFileURL()
-    let primaryStore = LocalFileAPIKeyStore(fileURL: fileURL)
+    let primaryStore = LocalFileAPIKeyStore(
+        fileURL: fileURL,
+        legacyFileURL: temporaryAPIKeyFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
     let store = EnvironmentFallbackAPIKeyStore(
         primary: primaryStore,
         environment: FakeEnvironmentProvider(values: ["LITELLM_API_KEY": "env-token"])
@@ -1374,7 +1462,10 @@ func testMissingPersistedKeyUsesEnvironmentFallbackForSpendService() async throw
 
 func testMissingPersistedKeyWithoutEnvironmentStillRequiresSetup() async throws {
     let store = EnvironmentFallbackAPIKeyStore(
-        primary: LocalFileAPIKeyStore(fileURL: temporaryAPIKeyFileURL()),
+        primary: LocalFileAPIKeyStore(
+            fileURL: temporaryAPIKeyFileURL(),
+            legacyFileURL: temporaryAPIKeyFileURL(namespace: "litellm_token_tracker_tests_unused")
+        ),
         environment: FakeEnvironmentProvider(values: [:])
     )
     let service = SpendService(
@@ -1409,7 +1500,10 @@ func snapshot(range: SpendRange = .today, total: Decimal = 8, isStale: Bool = fa
 @MainActor
 func testChangingSpendLimitRefreshesPresentationWithoutNetwork() async throws {
     let service = RecordingSpendService(results: [])
-    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
     try configurationStore.saveConfiguration(AppConfiguration(spendLimitUSD: 80))
     let viewModel = SpendDashboardViewModel(spendService: service, configurationStore: configurationStore)
     viewModel.currentSnapshot = try snapshot(range: .today, total: 40)
@@ -1427,7 +1521,10 @@ func testChangingSpendLimitRefreshesPresentationWithoutNetwork() async throws {
 @MainActor
 func testInvalidSpendLimitShowsSettingsError() async throws {
     let service = RecordingSpendService(results: [])
-    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
     let viewModel = SpendDashboardViewModel(spendService: service, configurationStore: configurationStore)
     viewModel.spendLimitDraft = "-1"
 
@@ -1439,7 +1536,10 @@ func testInvalidSpendLimitShowsSettingsError() async throws {
 
 @MainActor
 func testInvalidBaseURLShowsSettingsError() async throws {
-    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
     let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), configurationStore: configurationStore)
     viewModel.baseURLDraft = "httpx://litellm.example.internal"
 
@@ -1450,8 +1550,11 @@ func testInvalidBaseURLShowsSettingsError() async throws {
 
 @MainActor
 func testChangingBaseURLClearsSpendSnapshots() async throws {
-    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
-    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.justworksai.net")!, spendLimitUSD: 80))
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80))
     let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), configurationStore: configurationStore)
     viewModel.currentSnapshot = try snapshot(range: .today, total: 40)
     viewModel.menuBarSnapshot = try snapshot(range: .today, total: 40)
@@ -1467,9 +1570,17 @@ func testChangingBaseURLClearsSpendSnapshots() async throws {
 
 @MainActor
 func testChangingBaseURLPreservesSetupPauseState() async throws {
-    let configurationStore = LocalAppConfigurationStore(fileURL: temporaryConfigurationFileURL())
-    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.justworksai.net")!, spendLimitUSD: 80))
-    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), configurationStore: configurationStore)
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80))
+    let apiKeyStore = MutableAPIKeyStore()
+    let viewModel = SpendDashboardViewModel(
+        spendService: RecordingSpendService(results: []),
+        apiKeyStore: apiKeyStore,
+        configurationStore: configurationStore
+    )
     viewModel.requiresSetup = true
     viewModel.pausesAutomaticRefresh = true
     viewModel.baseURLDraft = "https://litellm.example.internal"
@@ -1705,7 +1816,7 @@ func testDefaultTitleShowsTodaySpendAndLimitPercent() throws {
 }
 
 func testSetupStateUsesCompactTitle() throws {
-    try expectEqual(MenuBarTitleFormatter.setupTitle(), "Set API Key", "setup title should fit in the menu bar")
+    try expectEqual(MenuBarTitleFormatter.setupTitle(), "Configure", "setup title should fit in the menu bar")
 }
 
 func testShowsAllFiveRanges() throws {
@@ -2164,7 +2275,7 @@ func testSetupStateDoesNotOverflowCompactTitle() async throws {
 
     await viewModel.refresh(now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
 
-    try expectEqual(viewModel.menuBarTitle, "Set API Key", "setup menu title should be compact")
+    try expectEqual(viewModel.menuBarTitle, "Configure", "setup menu title should be compact")
     try expect(viewModel.menuBarTitle.count <= 12, "setup menu title should stay short")
 }
 
@@ -2374,8 +2485,8 @@ func testMenuBarPresentationUsesSetupState() throws {
         metric: .dollars
     )
 
-    try expectEqual(presentation.label, "Set API Key", "setup state should show compact setup label")
-    try expectEqual(presentation.setupTitle, "Set API Key", "setup title should be present")
+    try expectEqual(presentation.label, "Configure", "setup state should show compact setup label")
+    try expectEqual(presentation.setupTitle, "Configure", "setup title should be present")
 }
 
 func testMenuBarRingAccessibilityLabelIncludesSpendAndBand() throws {
@@ -2455,7 +2566,7 @@ func testRingPresentationAccessibilityIncludesBandAndRange() throws {
 }
 
 func testMenuBarPreferenceDefaultsToDollars() throws {
-    let suiteName = "jw_tokens.preference.defaults.\(UUID().uuidString)"
+    let suiteName = "litellm_token_tracker.preference.defaults.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
     defer { defaults.removePersistentDomain(forName: suiteName) }
     let store = UserDefaultsMenuBarPreferenceStore(defaults: defaults)
@@ -2464,7 +2575,7 @@ func testMenuBarPreferenceDefaultsToDollars() throws {
 }
 
 func testMenuBarPreferencePersistsPercentMetric() throws {
-    let suiteName = "jw_tokens.preference.percent.\(UUID().uuidString)"
+    let suiteName = "litellm_token_tracker.preference.percent.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
     defer { defaults.removePersistentDomain(forName: suiteName) }
     let store = UserDefaultsMenuBarPreferenceStore(defaults: defaults)
@@ -2475,13 +2586,25 @@ func testMenuBarPreferencePersistsPercentMetric() throws {
 }
 
 func testMenuBarPreferenceFallsBackOnInvalidRawValue() throws {
-    let suiteName = "jw_tokens.preference.invalid.\(UUID().uuidString)"
+    let suiteName = "litellm_token_tracker.preference.invalid.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
     defer { defaults.removePersistentDomain(forName: suiteName) }
     defaults.set("invalid", forKey: UserDefaultsMenuBarPreferenceStore.metricKey)
     let store = UserDefaultsMenuBarPreferenceStore(defaults: defaults)
 
     try expectEqual(try store.loadMetric(), .dollars, "invalid preference should fall back to dollars")
+}
+
+func testMenuBarPreferenceMigratesLegacyKey() throws {
+    let suiteName = "litellm_token_tracker.preference.legacy.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defaults.set(MenuBarMetric.percent.rawValue, forKey: UserDefaultsMenuBarPreferenceStore.legacyMetricKey)
+    let store = UserDefaultsMenuBarPreferenceStore(defaults: defaults)
+
+    try expectEqual(try store.loadMetric(), .percent, "legacy metric key should migrate to renamed key")
+    try expectEqual(defaults.string(forKey: UserDefaultsMenuBarPreferenceStore.metricKey), MenuBarMetric.percent.rawValue, "renamed key should be populated during migration")
+    try expectEqual(defaults.string(forKey: UserDefaultsMenuBarPreferenceStore.legacyMetricKey), nil, "legacy metric key should be removed during migration")
 }
 
 func testMetricSelectorShowsDollarsAndPercentOptions() throws {
@@ -2817,7 +2940,7 @@ func testKeyHardFailureClearsPreviousKeyContext() async throws {
 }
 
 func testSettingsModeShowsCredentialSourceWithoutSecretPathByDefault() throws {
-    let presentation = SettingsPresentation.make(baseURLText: "https://litellm.justworksai.net", spendLimitText: "80", snapshot: nil, settingsError: nil)
+    let presentation = SettingsPresentation.make(baseURLText: "https://litellm.example.internal", spendLimitText: "80", snapshot: nil, settingsError: nil)
     let rows = Dictionary(uniqueKeysWithValues: presentation.diagnosticRows.map { ($0.label, $0.value) })
 
     try expectEqual(rows["Credential"], "Local file", "settings diagnostics should show credential source")
@@ -2835,7 +2958,7 @@ func testSettingsModeShowsDataSource() throws {
         isStale: false,
         analytics: analyticsSummary(totalSpendUSD: 8, dailyPoints: [], source: .userDailyActivity)
     )
-    let presentation = SettingsPresentation.make(baseURLText: "https://litellm.justworksai.net", spendLimitText: "80", snapshot: snapshot, settingsError: nil)
+    let presentation = SettingsPresentation.make(baseURLText: "https://litellm.example.internal", spendLimitText: "80", snapshot: snapshot, settingsError: nil)
     let rows = Dictionary(uniqueKeysWithValues: presentation.diagnosticRows.map { ($0.label, $0.value) })
 
     try expectEqual(rows["Source"], "Daily activity", "settings diagnostics should show current spend data source")
@@ -2855,14 +2978,21 @@ func testSettingsModeCanClearAPIKey() async throws {
 }
 
 func testSettingsModeShowsBaseURL() throws {
-    let presentation = SettingsPresentation.make(baseURLText: "https://litellm.justworksai.net", spendLimitText: "80", snapshot: nil, settingsError: nil)
+    let presentation = SettingsPresentation.make(baseURLText: "https://litellm.example.internal", spendLimitText: "80", snapshot: nil, settingsError: nil)
     let rows = Dictionary(uniqueKeysWithValues: presentation.diagnosticRows.map { ($0.label, $0.value) })
 
-    try expectEqual(rows["Endpoint"], "https://litellm.justworksai.net", "settings diagnostics should show configured base URL")
+    try expectEqual(rows["Endpoint"], "https://litellm.example.internal", "settings diagnostics should show configured base URL")
+}
+
+func testSettingsModeShowsUnconfiguredBaseURL() throws {
+    let presentation = SettingsPresentation.make(baseURLText: "", spendLimitText: "80", snapshot: nil, settingsError: nil)
+    let rows = Dictionary(uniqueKeysWithValues: presentation.diagnosticRows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Endpoint"], "Not configured", "settings diagnostics should show unconfigured endpoint state")
 }
 
 func testSettingsModeDocumentsLocalFileStoreRisk() throws {
-    let presentation = SettingsPresentation.make(baseURLText: "https://litellm.justworksai.net", spendLimitText: "80", snapshot: nil, settingsError: nil)
+    let presentation = SettingsPresentation.make(baseURLText: "https://litellm.example.internal", spendLimitText: "80", snapshot: nil, settingsError: nil)
 
     try expect(presentation.warningText.contains("local-development exception"), "settings diagnostics should document local file credential risk")
     try expect(presentation.warningText.contains("Keychain"), "settings diagnostics should point company builds back to Keychain or managed storage")
@@ -2870,7 +3000,7 @@ func testSettingsModeDocumentsLocalFileStoreRisk() throws {
 
 func testDiagnosticSummaryRedactsAPIKey() throws {
     let summary = DiagnosticSummary.make(
-        baseURLText: "https://litellm.justworksai.net",
+        baseURLText: "https://litellm.example.internal",
         snapshot: nil,
         lastError: "Request failed for Bearer secret-token and sk-should-not-display"
     )
@@ -2894,7 +3024,7 @@ func testDiagnosticSummaryRedactsEndpointSecrets() throws {
 }
 
 func testDiagnosticSummaryDoesNotIncludeCredentialPathByDefault() throws {
-    let summary = DiagnosticSummary.make(baseURLText: "https://litellm.justworksai.net", snapshot: nil)
+    let summary = DiagnosticSummary.make(baseURLText: "https://litellm.example.internal", snapshot: nil)
     let rows = Dictionary(uniqueKeysWithValues: summary.rows.map { ($0.label, $0.value) })
 
     try expectEqual(rows["Credential path"], "Hidden by default", "diagnostic summary should not include the credential path by default")
@@ -2913,16 +3043,16 @@ func testDiagnosticSummaryIncludesEndpointSourceAndUserID() throws {
         analytics: analyticsSummary(totalSpendUSD: 8, dailyPoints: [], source: .userDailyActivity),
         userContext: user
     )
-    let summary = DiagnosticSummary.make(baseURLText: "https://litellm.justworksai.net", snapshot: snapshot)
+    let summary = DiagnosticSummary.make(baseURLText: "https://litellm.example.internal", snapshot: snapshot)
     let rows = Dictionary(uniqueKeysWithValues: summary.rows.map { ($0.label, $0.value) })
 
-    try expectEqual(rows["Endpoint"], "https://litellm.justworksai.net", "diagnostic summary should include endpoint")
+    try expectEqual(rows["Endpoint"], "https://litellm.example.internal", "diagnostic summary should include endpoint")
     try expectEqual(rows["Source"], "Daily activity", "diagnostic summary should include data source")
     try expectEqual(rows["User"], "user-123", "diagnostic summary should include user id")
 }
 
 func testDiagnosticSummaryIncludesLastError() throws {
-    let summary = DiagnosticSummary.make(baseURLText: "https://litellm.justworksai.net", snapshot: nil, lastError: "Unable to refresh spend")
+    let summary = DiagnosticSummary.make(baseURLText: "https://litellm.example.internal", snapshot: nil, lastError: "Unable to refresh spend")
     let rows = Dictionary(uniqueKeysWithValues: summary.rows.map { ($0.label, $0.value) })
 
     try expectEqual(rows["Last error"], "Unable to refresh spend", "diagnostic summary should include last scoped error")
@@ -3045,6 +3175,8 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testLocalFileAPIKeyStoreSaveReadDelete", testLocalFileAPIKeyStoreSaveReadDelete),
     ("testLocalFileAPIKeyStoreMissingFileMapsToMissingKey", testLocalFileAPIKeyStoreMissingFileMapsToMissingKey),
     ("testLocalFileAPIKeyStoreUsesPrivatePermissions", testLocalFileAPIKeyStoreUsesPrivatePermissions),
+    ("testLocalFileAPIKeyStoreDefaultPathUsesRenamedNamespace", testLocalFileAPIKeyStoreDefaultPathUsesRenamedNamespace),
+    ("testLocalFileAPIKeyStoreMigratesLegacyPath", testLocalFileAPIKeyStoreMigratesLegacyPath),
     ("testEnvironmentFallbackUsesPersistedKeyFirst", testEnvironmentFallbackUsesPersistedKeyFirst),
     ("testEnvironmentFallbackPersistsEnvKeyWhenPrimaryMissing", testEnvironmentFallbackPersistsEnvKeyWhenPrimaryMissing),
     ("testEnvironmentFallbackMissingEnvStaysMissing", testEnvironmentFallbackMissingEnvStaysMissing),
@@ -3056,6 +3188,9 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testConfigurationStoreRejectsNonHTTPSchemes", testConfigurationStoreRejectsNonHTTPSchemes),
     ("testConfigurationStoreNormalizesSecretBearingBaseURLOnSave", testConfigurationStoreNormalizesSecretBearingBaseURLOnSave),
     ("testConfigurationStoreNormalizesSecretBearingBaseURLOnLoad", testConfigurationStoreNormalizesSecretBearingBaseURLOnLoad),
+    ("testConfigurationStoreDefaultPathUsesRenamedNamespace", testConfigurationStoreDefaultPathUsesRenamedNamespace),
+    ("testConfigurationStoreMigratesLegacyPath", testConfigurationStoreMigratesLegacyPath),
+    ("testConfigurationStorePersistsEnvironmentBaseURLWhenFileMissing", testConfigurationStorePersistsEnvironmentBaseURLWhenFileMissing),
     ("testDefaultTitleShowsTodaySpendAndLimitPercent", testDefaultTitleShowsTodaySpendAndLimitPercent),
     ("testSetupStateUsesCompactTitle", testSetupStateUsesCompactTitle),
     ("testShowsAllFiveRanges", testShowsAllFiveRanges),
@@ -3098,6 +3233,7 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testSettingsModeShowsCredentialSourceWithoutSecretPathByDefault", testSettingsModeShowsCredentialSourceWithoutSecretPathByDefault),
     ("testSettingsModeShowsDataSource", testSettingsModeShowsDataSource),
     ("testSettingsModeShowsBaseURL", testSettingsModeShowsBaseURL),
+    ("testSettingsModeShowsUnconfiguredBaseURL", testSettingsModeShowsUnconfiguredBaseURL),
     ("testSettingsModeDocumentsLocalFileStoreRisk", testSettingsModeDocumentsLocalFileStoreRisk),
     ("testDiagnosticSummaryRedactsAPIKey", testDiagnosticSummaryRedactsAPIKey),
     ("testDiagnosticSummaryRedactsEndpointSecrets", testDiagnosticSummaryRedactsEndpointSecrets),
@@ -3116,6 +3252,7 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testMenuBarPreferenceDefaultsToDollars", testMenuBarPreferenceDefaultsToDollars),
     ("testMenuBarPreferencePersistsPercentMetric", testMenuBarPreferencePersistsPercentMetric),
     ("testMenuBarPreferenceFallsBackOnInvalidRawValue", testMenuBarPreferenceFallsBackOnInvalidRawValue),
+    ("testMenuBarPreferenceMigratesLegacyKey", testMenuBarPreferenceMigratesLegacyKey),
     ("testMetricSelectorShowsDollarsAndPercentOptions", testMetricSelectorShowsDollarsAndPercentOptions),
     ("testPopoverModesExposeOverviewTrendsBreakdown", testPopoverModesExposeOverviewTrendsBreakdown)
 ]
@@ -3152,6 +3289,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testSpendServiceStaleCacheIsScopedByBaseURL", testSpendServiceStaleCacheIsScopedByBaseURL),
     ("testAuthFailureReturnsAuthFailedWithoutRetrying", testAuthFailureReturnsAuthFailedWithoutRetrying),
     ("testMissingKeyReturnsSetupRequired", testMissingKeyReturnsSetupRequired),
+    ("testMissingBaseURLReturnsSetupRequired", testMissingBaseURLReturnsSetupRequired),
     ("testMalformedResponseWithoutCacheReturnsFailed", testMalformedResponseWithoutCacheReturnsFailed),
     ("testUsesConfiguredSpendLimit", testUsesConfiguredSpendLimit),
     ("testSpendServiceUsesPersistedSpendLimit", testSpendServiceUsesPersistedSpendLimit),

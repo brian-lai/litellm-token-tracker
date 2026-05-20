@@ -1,5 +1,5 @@
 import SwiftUI
-import JWTokensCore
+import LiteLLMTokenTrackerCore
 
 struct BreakdownView: View {
     let presentation: BreakdownPresentation
