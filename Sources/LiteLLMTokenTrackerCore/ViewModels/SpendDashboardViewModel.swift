@@ -139,7 +139,7 @@ public final class SpendDashboardViewModel {
     public func saveSpendLimit() {
         let trimmedValue = spendLimitDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let spendLimit = Decimal(string: trimmedValue), spendLimit > 0 else {
-            settingsErrorMessage = "Spend limit must be a positive dollar amount"
+            settingsErrorMessage = "Daily budget must be a positive dollar amount"
             return
         }
         guard let configurationStore else {
@@ -184,7 +184,7 @@ public final class SpendDashboardViewModel {
     public func saveSettings() {
         let trimmedSpendLimit = spendLimitDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let spendLimit = Decimal(string: trimmedSpendLimit), spendLimit > 0 else {
-            settingsErrorMessage = "Spend limit must be a positive dollar amount"
+            settingsErrorMessage = "Daily budget must be a positive dollar amount"
             return
         }
 
@@ -337,11 +337,27 @@ public final class SpendDashboardViewModel {
 
     private func applySpendLimit(_ spendLimit: Decimal) {
         if let currentSnapshot {
-            self.currentSnapshot = currentSnapshot.applyingLimit(spendLimit)
+            let rangeBudget = budgetLimit(for: currentSnapshot.range, dailyBudget: spendLimit)
+            self.currentSnapshot = currentSnapshot.applyingLimit(rangeBudget)
         }
         if let menuBarSnapshot {
-            self.menuBarSnapshot = menuBarSnapshot.applyingLimit(spendLimit)
+            let rangeBudget = budgetLimit(for: menuBarSnapshot.range, dailyBudget: spendLimit)
+            self.menuBarSnapshot = menuBarSnapshot.applyingLimit(rangeBudget)
         }
+    }
+
+    private func budgetLimit(
+        for range: SpendRange,
+        dailyBudget: Decimal,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Decimal {
+        let dateRange = SpendRangeResolver().dateRange(for: range, now: now, calendar: calendar)
+        let start = calendar.startOfDay(for: dateRange.startDate)
+        let end = calendar.startOfDay(for: dateRange.endDate)
+        let dayDelta = calendar.dateComponents([.day], from: start, to: end).day ?? 1
+        let dayCount = max(1, dayDelta)
+        return dailyBudget * Decimal(dayCount)
     }
 
     private func clearSpendSnapshots() {

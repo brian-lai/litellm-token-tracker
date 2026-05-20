@@ -7,7 +7,7 @@ struct SettingsDiagnosticsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            TextField("Spend limit", text: $viewModel.spendLimitDraft)
+            TextField("Daily budget", text: $viewModel.spendLimitDraft)
                 .textFieldStyle(.roundedBorder)
             TextField("Base URL", text: $viewModel.baseURLDraft)
                 .textFieldStyle(.roundedBorder)

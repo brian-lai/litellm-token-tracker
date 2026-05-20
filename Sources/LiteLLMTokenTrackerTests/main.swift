@@ -1619,7 +1619,7 @@ func testInvalidSpendLimitShowsSettingsError() async throws {
     viewModel.saveSpendLimit()
 
     try expectEqual(service.requestedRanges, [], "invalid spend limit should not refresh spend")
-    try expectEqual(viewModel.settingsErrorMessage, "Spend limit must be a positive dollar amount", "invalid spend limit should show a scoped settings error")
+    try expectEqual(viewModel.settingsErrorMessage, "Daily budget must be a positive dollar amount", "invalid spend limit should show a scoped settings error")
 }
 
 @MainActor
@@ -1680,7 +1680,28 @@ func testInvalidSettingsSaveKeepsSettingsMode() async throws {
     viewModel.saveSettings()
 
     try expectEqual(viewModel.selectedPopoverMode, .settings, "failed settings save should keep settings mode visible")
-    try expectEqual(viewModel.settingsErrorMessage, "Spend limit must be a positive dollar amount", "failed settings save should expose validation error")
+    try expectEqual(viewModel.settingsErrorMessage, "Daily budget must be a positive dollar amount", "failed settings save should expose validation error")
+}
+
+func testSpendServiceScalesBudgetBySelectedRange() async throws {
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 40)),
+        clientFactory: { _, _ in
+            FakeClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+                rowsResult: .success([SpendLogSummaryRow(date: try! fixedDate("2026-05-18"), spendUSD: 10)])
+            )
+        }
+    )
+
+    let result = await service.refresh(range: .last7Days, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "expected refreshed result")
+    }
+    try expectEqual(snapshot.limitUSD, 280, "7D budget should be daily budget multiplied by 7")
+    try expectEqual(snapshot.percentOfLimit, Decimal(string: "0.03571428571428571428571428571428571428")!, "7D percent should use scaled budget")
 }
 
 @MainActor
@@ -1996,7 +2017,7 @@ func testPopoverPresentationShowsLimitText() throws {
         calendar: fixedCalendar()
     )
 
-    try expectEqual(presentation.limitText, "Limit $80.00", "popover should show spend limit")
+    try expectEqual(presentation.limitText, "Budget $80.00", "popover should show spend budget")
     try expectEqual(presentation.overLimitText, nil, "under-limit spend should not show over-limit text")
 }
 
@@ -2012,7 +2033,7 @@ func testPopoverPresentationIncludesMetricRows() throws {
     let rows = Dictionary(uniqueKeysWithValues: presentation.detailRows.map { ($0.label, $0.value) })
     try expectEqual(rows["Spend"], "$40.00", "detail rows should include spend")
     try expectEqual(rows["Usage"], "50%", "detail rows should include usage percent")
-    try expectEqual(rows["Limit"], "$80.00", "detail rows should include limit")
+    try expectEqual(rows["Budget"], "$80.00", "detail rows should include budget")
     try expectEqual(rows["Updated"], "12:00 AM", "detail rows should include refresh time")
 }
 
@@ -2083,7 +2104,7 @@ func testPopoverPresentationShowsOverLimitState() throws {
     )
 
     try expectEqual(presentation.primaryGauge.progress, 1, "over-limit gauge should clamp")
-    try expectEqual(presentation.overLimitText, "$16.00 over limit", "popover should show over-limit amount")
+    try expectEqual(presentation.overLimitText, "$16.00 over budget", "popover should show over-budget amount")
 }
 
 func testPopoverPresentationPreservesStaleStatus() throws {
@@ -3651,6 +3672,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testMalformedResponseWithoutCacheReturnsFailed", testMalformedResponseWithoutCacheReturnsFailed),
     ("testUsesConfiguredSpendLimit", testUsesConfiguredSpendLimit),
     ("testSpendServiceUsesPersistedSpendLimit", testSpendServiceUsesPersistedSpendLimit),
+    ("testSpendServiceScalesBudgetBySelectedRange", testSpendServiceScalesBudgetBySelectedRange),
     ("testMissingPersistedKeyUsesEnvironmentFallbackForSpendService", testMissingPersistedKeyUsesEnvironmentFallbackForSpendService),
     ("testMissingPersistedKeyWithoutEnvironmentStillRequiresSetup", testMissingPersistedKeyWithoutEnvironmentStillRequiresSetup),
     ("testInitialRefreshLoadsTodaySnapshot", testInitialRefreshLoadsTodaySnapshot),
