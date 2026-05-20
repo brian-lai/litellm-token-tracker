@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 @testable import LiteLLMTokenTrackerUI
 import LiteLLMTokenTrackerCore
@@ -97,7 +98,7 @@ final class MutableAPIKeyStore: APIKeyStoring, @unchecked Sendable {
 @MainActor
 final class RecordingStatusItemControllerHooks {
     var primaryToggleCount = 0
-    var presentedMenus: [[StatusItemMenuActionState]] = []
+    var presentedMenuSnapshots: [StatusItemMenuSnapshot] = []
     var settingsPopoverCount = 0
     var terminateCount = 0
 
@@ -105,10 +106,34 @@ final class RecordingStatusItemControllerHooks {
         StatusItemController(
             viewModel: viewModel,
             popoverToggleAction: { self.primaryToggleCount += 1 },
-            contextMenuPresenter: { self.presentedMenus.append($0) },
+            contextMenuPopupAction: { menu in
+                self.presentedMenuSnapshots.append(StatusItemMenuSnapshot(menu: menu))
+            },
             settingsPopoverAction: { self.settingsPopoverCount += 1 },
             terminateAction: { self.terminateCount += 1 }
         )
+    }
+}
+
+struct StatusItemMenuSnapshot: Equatable {
+    struct Item: Equatable {
+        let title: String
+        let isSeparator: Bool
+        let isEnabled: Bool
+        let action: StatusItemMenuAction?
+    }
+
+    let items: [Item]
+
+    init(menu: NSMenu) {
+        items = menu.items.map { item in
+            Item(
+                title: item.title,
+                isSeparator: item.isSeparatorItem,
+                isEnabled: item.isEnabled,
+                action: (item.representedObject as? String).flatMap(StatusItemMenuAction.init(rawValue:))
+            )
+        }
     }
 }
 
@@ -2700,7 +2725,7 @@ func testHandlePrimaryClickUsesPopoverTogglePath() throws {
     controller.handlePrimaryClick()
 
     try expectEqual(hooks.primaryToggleCount, 1, "primary click should route through the popover toggle path")
-    try expectEqual(hooks.presentedMenus.count, 0, "primary click should not present the context menu")
+    try expectEqual(hooks.presentedMenuSnapshots.count, 0, "primary click should not present the context menu")
 }
 
 @MainActor
@@ -2711,8 +2736,30 @@ func testHandleSecondaryClickUsesContextMenuPath() throws {
     controller.handleSecondaryClick()
 
     try expectEqual(hooks.primaryToggleCount, 0, "secondary click should not route through the popover toggle path")
-    try expectEqual(hooks.presentedMenus.count, 1, "secondary click should present the context menu")
-    try expectEqual(hooks.presentedMenus[0].map(\.action), [.settings, .refresh, .exit], "secondary click should expose settings, refresh, and exit")
+    try expectEqual(hooks.presentedMenuSnapshots.count, 1, "secondary click should present the context menu")
+    try expectEqual(
+        hooks.presentedMenuSnapshots[0].items,
+        [
+            StatusItemMenuSnapshot.Item(title: "Settings", isSeparator: false, isEnabled: true, action: .settings),
+            StatusItemMenuSnapshot.Item(title: "Refresh", isSeparator: false, isEnabled: true, action: .refresh),
+            StatusItemMenuSnapshot.Item(title: "", isSeparator: true, isEnabled: false, action: nil),
+            StatusItemMenuSnapshot.Item(title: "Exit", isSeparator: false, isEnabled: true, action: .exit)
+        ],
+        "secondary click should build the settings, refresh, separator, exit menu in order"
+    )
+}
+
+@MainActor
+func testHandleSecondaryClickDisablesRefreshInBuiltMenuWhileRefreshIsRunning() throws {
+    let hooks = RecordingStatusItemControllerHooks()
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []))
+    let controller = hooks.makeController(viewModel: viewModel)
+    viewModel.isRefreshing = true
+
+    controller.handleSecondaryClick()
+
+    let refreshItem = try hooks.presentedMenuSnapshots[0].items.first { $0.action == .refresh }.unwrap("refresh menu item")
+    try expect(!refreshItem.isEnabled, "secondary click should build a disabled refresh menu item while refresh is already running")
 }
 
 @MainActor
@@ -3403,7 +3450,8 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testAvailableMenuActionsExposeSettingsRefreshAndExitInOrder", testAvailableMenuActionsExposeSettingsRefreshAndExitInOrder),
     ("testRefreshMenuActionIsDisabledWhileRefreshIsRunning", testRefreshMenuActionIsDisabledWhileRefreshIsRunning),
     ("testHandlePrimaryClickUsesPopoverTogglePath", testHandlePrimaryClickUsesPopoverTogglePath),
-    ("testHandleSecondaryClickUsesContextMenuPath", testHandleSecondaryClickUsesContextMenuPath)
+    ("testHandleSecondaryClickUsesContextMenuPath", testHandleSecondaryClickUsesContextMenuPath),
+    ("testHandleSecondaryClickDisablesRefreshInBuiltMenuWhileRefreshIsRunning", testHandleSecondaryClickDisablesRefreshInBuiltMenuWhileRefreshIsRunning)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [

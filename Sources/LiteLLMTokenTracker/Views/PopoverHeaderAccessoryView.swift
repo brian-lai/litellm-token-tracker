@@ -10,6 +10,7 @@ struct PopoverHeaderAccessoryView: View {
             Image(systemName: Self.settingsSymbolName)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Open Settings")
         .help("Open Settings")
     }
 }

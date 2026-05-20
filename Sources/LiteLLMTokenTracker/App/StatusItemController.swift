@@ -9,7 +9,7 @@ public final class StatusItemController: NSObject {
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
     private let popoverToggleAction: (() -> Void)?
-    private let contextMenuPresenter: (([StatusItemMenuActionState]) -> Void)?
+    private let contextMenuPopupAction: ((NSMenu) -> Void)?
     private let settingsPopoverAction: (() -> Void)?
     private let terminateAction: () -> Void
     private var activeContextMenu: NSMenu?
@@ -18,7 +18,7 @@ public final class StatusItemController: NSObject {
         self.init(
             viewModel: viewModel,
             popoverToggleAction: nil,
-            contextMenuPresenter: nil,
+            contextMenuPopupAction: nil,
             settingsPopoverAction: nil,
             terminateAction: nil
         )
@@ -27,14 +27,14 @@ public final class StatusItemController: NSObject {
     init(
         viewModel: SpendDashboardViewModel,
         popoverToggleAction: (() -> Void)? = nil,
-        contextMenuPresenter: (([StatusItemMenuActionState]) -> Void)? = nil,
+        contextMenuPopupAction: ((NSMenu) -> Void)? = nil,
         settingsPopoverAction: (() -> Void)? = nil,
         terminateAction: (() -> Void)? = nil
     ) {
         self.viewModel = viewModel
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.popoverToggleAction = popoverToggleAction
-        self.contextMenuPresenter = contextMenuPresenter
+        self.contextMenuPopupAction = contextMenuPopupAction
         self.settingsPopoverAction = settingsPopoverAction
         self.terminateAction = terminateAction ?? { NSApp.terminate(nil) }
         super.init()
@@ -109,12 +109,7 @@ public final class StatusItemController: NSObject {
             popover.performClose(nil)
         }
 
-        let actions = availableMenuActions()
-        if let contextMenuPresenter {
-            contextMenuPresenter(actions)
-        } else {
-            presentContextMenu(actions)
-        }
+        presentContextMenu(availableMenuActions())
     }
 
     func performMenuAction(_ action: StatusItemMenuAction) async {
@@ -180,9 +175,12 @@ public final class StatusItemController: NSObject {
             menu.addItem(item)
         }
         activeContextMenu = menu
-        statusItem.menu = menu
-        statusItem.button?.performClick(nil)
-        statusItem.menu = nil
+        if let contextMenuPopupAction {
+            contextMenuPopupAction(menu)
+        } else {
+            let popupSelector = NSSelectorFromString("popUpStatusItemMenu:")
+            _ = statusItem.perform(popupSelector, with: menu)
+        }
         activeContextMenu = nil
     }
 
