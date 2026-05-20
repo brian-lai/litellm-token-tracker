@@ -40,7 +40,11 @@ trap cleanup EXIT
 unzip -q "${ZIP_PATH}" -d "${TMP_DIR}" || fail "unable to unzip release archive"
 [[ -d "${TMP_DIR}/LiteLLMTokenTracker.app" ]] || fail "archive must contain LiteLLMTokenTracker.app at root"
 
-mapfile -t top_entries < <(zipinfo -1 "${ZIP_PATH}" | awk -F/ 'NF {print $1}' | sort -u)
+top_entries=()
+while IFS= read -r entry; do
+  top_entries+=("${entry}")
+done < <(zipinfo -1 "${ZIP_PATH}" | awk -F/ 'NF {print $1}' | sort -u)
+
 assert_equals "${#top_entries[@]}" "1" "archive root entry count"
 assert_equals "${top_entries[0]}" "LiteLLMTokenTracker.app" "archive root entry name"
 
