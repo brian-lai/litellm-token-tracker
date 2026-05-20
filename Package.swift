@@ -21,6 +21,10 @@ let package = Package(
             name: "LiteLLMTokenTrackerUI",
             dependencies: ["LiteLLMTokenTrackerCore"],
             path: "Sources/LiteLLMTokenTracker",
+            exclude: [
+                "App/LiteLLMTokenTrackerApp.swift",
+                "Support"
+            ],
             sources: [
                 "App/StatusItemController.swift",
                 "App/StatusItemMenuAction.swift",
@@ -39,6 +43,11 @@ let package = Package(
             name: "LiteLLMTokenTracker",
             dependencies: ["LiteLLMTokenTrackerCore", "LiteLLMTokenTrackerUI"],
             path: "Sources/LiteLLMTokenTracker",
+            exclude: [
+                "App/StatusItemController.swift",
+                "App/StatusItemMenuAction.swift",
+                "Views"
+            ],
             sources: [
                 "App/LiteLLMTokenTrackerApp.swift",
                 "Support/LiteLLMTokenTrackerPreviewFixtures.swift"

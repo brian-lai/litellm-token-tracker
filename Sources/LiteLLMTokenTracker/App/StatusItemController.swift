@@ -4,7 +4,7 @@ import SwiftUI
 import LiteLLMTokenTrackerCore
 
 @MainActor
-final class StatusItemController: NSObject {
+public final class StatusItemController: NSObject {
     private let viewModel: SpendDashboardViewModel
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
@@ -13,6 +13,16 @@ final class StatusItemController: NSObject {
     private let settingsPopoverAction: (() -> Void)?
     private let terminateAction: () -> Void
     private var activeContextMenu: NSMenu?
+
+    public convenience init(viewModel: SpendDashboardViewModel) {
+        self.init(
+            viewModel: viewModel,
+            popoverToggleAction: nil,
+            contextMenuPresenter: nil,
+            settingsPopoverAction: nil,
+            terminateAction: nil
+        )
+    }
 
     init(
         viewModel: SpendDashboardViewModel,
@@ -170,7 +180,9 @@ final class StatusItemController: NSObject {
             menu.addItem(item)
         }
         activeContextMenu = menu
-        statusItem.popUpMenu(menu)
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
         activeContextMenu = nil
     }
 

@@ -106,6 +106,15 @@ This project intentionally uses local file storage for the API key during local 
 - Color bands move from green to red as spend approaches the limit.
 - The menu bar snapshot stays pinned to today even when the popover is looking at a broader range.
 
+## Interaction Model
+
+- Left click toggles the spend popover.
+- Right click opens a context menu with `Settings`, `Refresh`, and `Exit`.
+- `Settings` in the context menu opens the existing popover on the `Settings` mode.
+- The expanded popover also shows a top-right cog that switches to the existing `Settings` mode.
+- `Refresh` uses the same `refreshSelectedMode()` path as the in-popover refresh button, including the existing disabled state while refresh is already running.
+- `Exit` terminates the app through the normal macOS app lifecycle.
+
 ## Popover Modes
 
 `Overview`
