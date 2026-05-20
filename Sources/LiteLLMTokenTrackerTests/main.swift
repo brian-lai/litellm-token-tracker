@@ -1593,6 +1593,53 @@ func testInvalidBaseURLShowsSettingsError() async throws {
 }
 
 @MainActor
+func testSaveSettingsPersistsBothFieldsAndExitsSettingsMode() async throws {
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.old.internal")!, spendLimitUSD: 80))
+
+    let viewModel = SpendDashboardViewModel(
+        spendService: RecordingSpendService(results: []),
+        configurationStore: configurationStore
+    )
+    await viewModel.openSettings()
+    viewModel.spendLimitDraft = "120"
+    viewModel.baseURLDraft = "https://litellm.new.internal"
+
+    viewModel.saveSettings()
+
+    let saved = try configurationStore.loadConfiguration()
+    try expectEqual(saved.spendLimitUSD, Decimal(string: "120")!, "single settings save should persist spend limit")
+    try expectEqual(saved.baseURL?.absoluteString, "https://litellm.new.internal", "single settings save should persist base URL")
+    try expectEqual(viewModel.selectedPopoverMode, .overview, "successful settings save should exit settings mode")
+    try expectEqual(viewModel.settingsErrorMessage, nil, "successful settings save should clear settings errors")
+}
+
+@MainActor
+func testInvalidSettingsSaveKeepsSettingsMode() async throws {
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80))
+
+    let viewModel = SpendDashboardViewModel(
+        spendService: RecordingSpendService(results: []),
+        configurationStore: configurationStore
+    )
+    await viewModel.openSettings()
+    viewModel.spendLimitDraft = "-1"
+    viewModel.baseURLDraft = "https://litellm.example.internal"
+
+    viewModel.saveSettings()
+
+    try expectEqual(viewModel.selectedPopoverMode, .settings, "failed settings save should keep settings mode visible")
+    try expectEqual(viewModel.settingsErrorMessage, "Spend limit must be a positive dollar amount", "failed settings save should expose validation error")
+}
+
+@MainActor
 func testChangingBaseURLClearsSpendSnapshots() async throws {
     let configurationStore = LocalAppConfigurationStore(
         fileURL: temporaryConfigurationFileURL(),
@@ -3496,6 +3543,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testChangingSpendLimitRefreshesPresentationWithoutNetwork", testChangingSpendLimitRefreshesPresentationWithoutNetwork),
     ("testInvalidSpendLimitShowsSettingsError", testInvalidSpendLimitShowsSettingsError),
     ("testInvalidBaseURLShowsSettingsError", testInvalidBaseURLShowsSettingsError),
+    ("testSaveSettingsPersistsBothFieldsAndExitsSettingsMode", testSaveSettingsPersistsBothFieldsAndExitsSettingsMode),
+    ("testInvalidSettingsSaveKeepsSettingsMode", testInvalidSettingsSaveKeepsSettingsMode),
     ("testChangingBaseURLClearsSpendSnapshots", testChangingBaseURLClearsSpendSnapshots),
     ("testChangingBaseURLPreservesSetupPauseState", testChangingBaseURLPreservesSetupPauseState),
     ("testAPIKeyChangeClearsSpendSnapshots", testAPIKeyChangeClearsSpendSnapshots),
