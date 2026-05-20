@@ -7,19 +7,12 @@ struct SettingsDiagnosticsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                TextField("Spend limit", text: $viewModel.spendLimitDraft)
-                    .textFieldStyle(.roundedBorder)
-                Button("Save") {
-                    viewModel.saveSpendLimit()
-                }
-            }
-            HStack(spacing: 8) {
-                TextField("Base URL", text: $viewModel.baseURLDraft)
-                    .textFieldStyle(.roundedBorder)
-                Button("Save") {
-                    viewModel.saveBaseURL()
-                }
+            TextField("Spend limit", text: $viewModel.spendLimitDraft)
+                .textFieldStyle(.roundedBorder)
+            TextField("Base URL", text: $viewModel.baseURLDraft)
+                .textFieldStyle(.roundedBorder)
+            Button("Save") {
+                viewModel.saveSettings()
             }
             if let errorText = presentation.errorText {
                 Text(errorText)

@@ -166,6 +166,44 @@ public final class SpendDashboardViewModel {
         }
     }
 
+    public func saveSettings() {
+        let trimmedSpendLimit = spendLimitDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let spendLimit = Decimal(string: trimmedSpendLimit), spendLimit > 0 else {
+            settingsErrorMessage = "Spend limit must be a positive dollar amount"
+            return
+        }
+
+        let trimmedBaseURL = baseURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let baseURL = URL(string: trimmedBaseURL)?.normalizedForConfiguration else {
+            settingsErrorMessage = "Base URL must be a valid HTTP URL"
+            return
+        }
+
+        guard let configurationStore else {
+            settingsErrorMessage = "Unable to save settings"
+            return
+        }
+
+        do {
+            let currentConfiguration = try configurationStore.loadConfiguration()
+            try configurationStore.saveConfiguration(AppConfiguration(baseURL: baseURL, spendLimitUSD: spendLimit))
+
+            applySpendLimit(spendLimit)
+            spendLimitDraft = NSDecimalNumber(decimal: spendLimit).stringValue
+            baseURLDraft = baseURL.absoluteString
+            settingsErrorMessage = nil
+
+            if currentConfiguration.baseURL != baseURL {
+                clearEndpointScopedState()
+                syncSetupState(preservingCurrentError: false)
+            }
+
+            selectedPopoverMode = .overview
+        } catch {
+            settingsErrorMessage = "Unable to save settings"
+        }
+    }
+
     public func clearAPIKey() {
         guard let apiKeyStore else {
             errorMessage = "Unable to clear LiteLLM API key"
