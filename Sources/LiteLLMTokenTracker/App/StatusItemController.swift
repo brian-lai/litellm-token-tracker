@@ -59,6 +59,17 @@ final class StatusItemController: NSObject {
         button.sizeToFit()
     }
 
+    func availableMenuActions() -> [StatusItemMenuActionState] {
+        [
+            StatusItemMenuActionState(action: .settings, isEnabled: true),
+            StatusItemMenuActionState(
+                action: .refresh,
+                isEnabled: !(viewModel.isRefreshing || viewModel.isKeyContextRefreshing)
+            ),
+            StatusItemMenuActionState(action: .exit, isEnabled: true)
+        ]
+    }
+
     @objc private func togglePopover() {
         guard let button = statusItem.button else {
             return

@@ -1,4 +1,5 @@
 import Foundation
+@testable import LiteLLMTokenTrackerUI
 import LiteLLMTokenTrackerCore
 
 struct TestFailure: Error, CustomStringConvertible {
@@ -2629,9 +2630,43 @@ func testSelectingPopoverModeDoesNotRefreshSpend() async throws {
     try expectEqual(service.requestedRanges, [], "mode selection should not refresh spend")
 }
 
+@MainActor
+func testOpenSettingsSelectsSettingsMode() async throws {
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []))
+
+    await viewModel.openSettings()
+
+    try expectEqual(viewModel.selectedPopoverMode, .settings, "open settings should route to the existing settings mode")
+}
+
 func testPopoverModesExposeOverviewTrendsBreakdown() throws {
     try expectEqual(SpendPopoverMode.allCases, [.overview, .trends, .breakdown, .keys, .settings], "popover should expose analytics, key, and settings modes")
     try expectEqual(SpendPopoverMode.allCases.map(\.displayName), ["Overview", "Trends", "Breakdown", "Keys", "Settings"], "popover modes should have display names")
+}
+
+func testStatusItemMenuActionCasesAreStable() throws {
+    try expectEqual(StatusItemMenuAction.allCases, [.settings, .refresh, .exit], "status item menu action cases should stay stable")
+}
+
+@MainActor
+func testAvailableMenuActionsExposeSettingsRefreshAndExitInOrder() throws {
+    let controller = StatusItemController(viewModel: SpendDashboardViewModel(spendService: RecordingSpendService(results: [])))
+
+    let actions = controller.availableMenuActions()
+
+    try expectEqual(actions.map(\.action), [.settings, .refresh, .exit], "status item menu actions should stay ordered")
+    try expect(actions.allSatisfy(\.isEnabled), "status item menu actions should default to enabled")
+}
+
+@MainActor
+func testRefreshMenuActionIsDisabledWhileRefreshIsRunning() throws {
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []))
+    let controller = StatusItemController(viewModel: viewModel)
+    viewModel.isRefreshing = true
+
+    let refreshAction = try actionsByMenuAction(controller.availableMenuActions())[.refresh].unwrap("refresh action")
+
+    try expect(!refreshAction.isEnabled, "refresh action should be disabled while a refresh is already running")
 }
 
 @MainActor
@@ -2645,6 +2680,19 @@ func testKeysModeLoadsKeyContextLazily() async throws {
 
     try expectEqual(keyService.requestedDates.count, 1, "keys mode should lazily load key context")
     try expectEqual(viewModel.keyContextSnapshot, snapshot, "view model should store key context")
+}
+
+func actionsByMenuAction(_ actions: [StatusItemMenuActionState]) -> [StatusItemMenuAction: StatusItemMenuActionState] {
+    Dictionary(uniqueKeysWithValues: actions.map { ($0.action, $0) })
+}
+
+extension Optional {
+    func unwrap(_ description: String) throws -> Wrapped {
+        guard let self else {
+            throw TestFailure(description: "Missing \(description)")
+        }
+        return self
+    }
 }
 
 @MainActor
@@ -3254,7 +3302,10 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testMenuBarPreferenceFallsBackOnInvalidRawValue", testMenuBarPreferenceFallsBackOnInvalidRawValue),
     ("testMenuBarPreferenceMigratesLegacyKey", testMenuBarPreferenceMigratesLegacyKey),
     ("testMetricSelectorShowsDollarsAndPercentOptions", testMetricSelectorShowsDollarsAndPercentOptions),
-    ("testPopoverModesExposeOverviewTrendsBreakdown", testPopoverModesExposeOverviewTrendsBreakdown)
+    ("testPopoverModesExposeOverviewTrendsBreakdown", testPopoverModesExposeOverviewTrendsBreakdown),
+    ("testStatusItemMenuActionCasesAreStable", testStatusItemMenuActionCasesAreStable),
+    ("testAvailableMenuActionsExposeSettingsRefreshAndExitInOrder", testAvailableMenuActionsExposeSettingsRefreshAndExitInOrder),
+    ("testRefreshMenuActionIsDisabledWhileRefreshIsRunning", testRefreshMenuActionIsDisabledWhileRefreshIsRunning)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [
@@ -3332,6 +3383,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testMetricAndRangeControlsRemainIndependent", testMetricAndRangeControlsRemainIndependent),
     ("testDefaultPopoverModeIsOverview", testDefaultPopoverModeIsOverview),
     ("testSelectingPopoverModeDoesNotRefreshSpend", testSelectingPopoverModeDoesNotRefreshSpend),
+    ("testOpenSettingsSelectsSettingsMode", testOpenSettingsSelectsSettingsMode),
     ("testKeysModeLoadsKeyContextLazily", testKeysModeLoadsKeyContextLazily),
     ("testKeyContextUsesCachedUserIDFromAnalyticsRefresh", testKeyContextUsesCachedUserIDFromAnalyticsRefresh),
     ("testKeyContextFailurePreservesSpendSnapshot", testKeyContextFailurePreservesSpendSnapshot),
