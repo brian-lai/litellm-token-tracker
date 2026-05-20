@@ -34,7 +34,7 @@ Requirements:
 ### Install Latest Public Release (curl | bash)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/brian-lai/litellm-token-tracker/main/scripts/install-release.sh | bash
+curl -fsSL https://raw.githubusercontent.com/brian-lai/litellm_token_tracker/main/scripts/install-release.sh | bash
 ```
 
 This downloads the latest `LiteLLMTokenTracker-macos.zip` GitHub release asset, installs `LiteLLMTokenTracker.app` into `~/Applications/LiteLLMTokenTracker.app`, and launches it.

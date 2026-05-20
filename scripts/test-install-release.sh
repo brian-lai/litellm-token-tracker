@@ -71,6 +71,7 @@ run_installer_case() {
   local disable_python3="$5"
   local expect_exit="$6"
   local expect_contains="$7"
+  local use_default_metadata_url="${8:-0}"
 
   local case_dir
   case_dir="$(mktemp -d "${TMPDIR:-/tmp}/litellm-install-test-${case_name}.XXXXXX")"
@@ -167,21 +168,37 @@ EOF
   fi
 
   set +e
-  (
-    cd "${work_dir}"
-    HOME="${app_home}" \
-    PATH="${run_path}" \
-    MOCK_RELEASE_METADATA_URL="${metadata_url}" \
-    MOCK_RELEASE_METADATA_PATH="${resolved_metadata}" \
-    MOCK_RELEASE_ASSET_URL="${asset_url}" \
-    MOCK_RELEASE_ASSET_PATH="${asset_zip_path}" \
-    MOCK_BAD_ZIP_PATH="${bad_zip_path}" \
-    MOCK_ASSET_MODE="${asset_zip_mode}" \
-    MOCK_OPEN_EXIT="${open_exit}" \
-    RELEASE_METADATA_URL="${metadata_url}" \
-    RELEASE_REPO="brian-lai/litellm_token_tracker" \
-    "${INSTALL_SCRIPT}"
-  ) >"${out_file}" 2>&1
+  if [[ "${use_default_metadata_url}" == "1" ]]; then
+    (
+      cd "${work_dir}"
+      HOME="${app_home}" \
+      PATH="${run_path}" \
+      MOCK_RELEASE_METADATA_URL="${metadata_url}" \
+      MOCK_RELEASE_METADATA_PATH="${resolved_metadata}" \
+      MOCK_RELEASE_ASSET_URL="${asset_url}" \
+      MOCK_RELEASE_ASSET_PATH="${asset_zip_path}" \
+      MOCK_BAD_ZIP_PATH="${bad_zip_path}" \
+      MOCK_ASSET_MODE="${asset_zip_mode}" \
+      MOCK_OPEN_EXIT="${open_exit}" \
+      "${INSTALL_SCRIPT}"
+    ) >"${out_file}" 2>&1
+  else
+    (
+      cd "${work_dir}"
+      HOME="${app_home}" \
+      PATH="${run_path}" \
+      MOCK_RELEASE_METADATA_URL="${metadata_url}" \
+      MOCK_RELEASE_METADATA_PATH="${resolved_metadata}" \
+      MOCK_RELEASE_ASSET_URL="${asset_url}" \
+      MOCK_RELEASE_ASSET_PATH="${asset_zip_path}" \
+      MOCK_BAD_ZIP_PATH="${bad_zip_path}" \
+      MOCK_ASSET_MODE="${asset_zip_mode}" \
+      MOCK_OPEN_EXIT="${open_exit}" \
+      RELEASE_METADATA_URL="${metadata_url}" \
+      RELEASE_REPO="brian-lai/litellm_token_tracker" \
+      "${INSTALL_SCRIPT}"
+    ) >"${out_file}" 2>&1
+  fi
   local exit_code=$?
   set -e
 
@@ -212,5 +229,6 @@ run_installer_case "missing_bundle" "release-success.json" "missing_bundle" "0" 
 run_installer_case "missing_python3" "release-success.json" "good" "0" "1" "1" "required command not found: python3"
 run_installer_case "replace_existing_app" "release-success.json" "good" "0" "0" "0" "Installed LiteLLMTokenTracker.app"
 run_installer_case "launch_failure" "release-success.json" "good" "1" "0" "1" "launch"
+run_installer_case "default_metadata_url" "release-success.json" "good" "0" "0" "0" "Installed LiteLLMTokenTracker.app" "1"
 
 printf 'PASS testInstallReleaseContract\n'
