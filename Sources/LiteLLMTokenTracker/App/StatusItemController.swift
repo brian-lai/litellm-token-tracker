@@ -8,10 +8,25 @@ final class StatusItemController: NSObject {
     private let viewModel: SpendDashboardViewModel
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
+    private let popoverToggleAction: (() -> Void)?
+    private let contextMenuPresenter: (([StatusItemMenuActionState]) -> Void)?
+    private let settingsPopoverAction: (() -> Void)?
+    private let terminateAction: () -> Void
+    private var activeContextMenu: NSMenu?
 
-    init(viewModel: SpendDashboardViewModel) {
+    init(
+        viewModel: SpendDashboardViewModel,
+        popoverToggleAction: (() -> Void)? = nil,
+        contextMenuPresenter: (([StatusItemMenuActionState]) -> Void)? = nil,
+        settingsPopoverAction: (() -> Void)? = nil,
+        terminateAction: (() -> Void)? = nil
+    ) {
         self.viewModel = viewModel
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        self.popoverToggleAction = popoverToggleAction
+        self.contextMenuPresenter = contextMenuPresenter
+        self.settingsPopoverAction = settingsPopoverAction
+        self.terminateAction = terminateAction ?? { NSApp.terminate(nil) }
         super.init()
         configureStatusItem()
         configurePopover()
@@ -24,7 +39,8 @@ final class StatusItemController: NSObject {
             return
         }
         button.target = self
-        button.action = #selector(togglePopover)
+        button.action = #selector(handleStatusItemClick)
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         button.imagePosition = .imageLeading
         button.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
     }
@@ -70,7 +86,49 @@ final class StatusItemController: NSObject {
         ]
     }
 
-    @objc private func togglePopover() {
+    func handlePrimaryClick() {
+        if let popoverToggleAction {
+            popoverToggleAction()
+        } else {
+            togglePopover()
+        }
+    }
+
+    func handleSecondaryClick() {
+        if popover.isShown {
+            popover.performClose(nil)
+        }
+
+        let actions = availableMenuActions()
+        if let contextMenuPresenter {
+            contextMenuPresenter(actions)
+        } else {
+            presentContextMenu(actions)
+        }
+    }
+
+    func performMenuAction(_ action: StatusItemMenuAction) async {
+        switch action {
+        case .settings:
+            await viewModel.openSettings()
+            showSettingsPopover()
+        case .refresh:
+            await viewModel.refreshSelectedMode()
+        case .exit:
+            terminateAction()
+        }
+    }
+
+    @objc private func handleStatusItemClick() {
+        switch NSApp.currentEvent?.type {
+        case .rightMouseUp:
+            handleSecondaryClick()
+        default:
+            handlePrimaryClick()
+        }
+    }
+
+    private func togglePopover() {
         guard let button = statusItem.button else {
             return
         }
@@ -80,6 +138,51 @@ final class StatusItemController: NSObject {
             updateStatusItem()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
+        }
+    }
+
+    private func showSettingsPopover() {
+        if let settingsPopoverAction {
+            settingsPopoverAction()
+            return
+        }
+
+        guard let button = statusItem.button else {
+            return
+        }
+        if !popover.isShown {
+            updateStatusItem()
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        }
+        popover.contentViewController?.view.window?.makeKey()
+    }
+
+    private func presentContextMenu(_ actions: [StatusItemMenuActionState]) {
+        let menu = NSMenu()
+        for actionState in actions {
+            if actionState.action == .exit {
+                menu.addItem(.separator())
+            }
+            let item = NSMenuItem(title: actionState.action.menuTitle, action: #selector(handleContextMenuSelection(_:)), keyEquivalent: "")
+            item.target = self
+            item.isEnabled = actionState.isEnabled
+            item.representedObject = actionState.action.rawValue
+            menu.addItem(item)
+        }
+        activeContextMenu = menu
+        statusItem.popUpMenu(menu)
+        activeContextMenu = nil
+    }
+
+    @objc private func handleContextMenuSelection(_ sender: NSMenuItem) {
+        guard
+            let rawValue = sender.representedObject as? String,
+            let action = StatusItemMenuAction(rawValue: rawValue)
+        else {
+            return
+        }
+        Task { @MainActor in
+            await performMenuAction(action)
         }
     }
 }
