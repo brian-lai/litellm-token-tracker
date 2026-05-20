@@ -2,6 +2,10 @@ import SwiftUI
 import LiteLLMTokenTrackerCore
 
 struct SpendPopoverView: View {
+    static var modeSelectorModes: [SpendPopoverMode] {
+        SpendPopoverMode.allCases
+    }
+
     @Bindable var viewModel: SpendDashboardViewModel
 
     var body: some View {
@@ -14,6 +18,14 @@ struct SpendPopoverView: View {
         )
 
         VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Spacer()
+                PopoverHeaderAccessoryView {
+                    Task {
+                        await viewModel.openSettings()
+                    }
+                }
+            }
             HStack(alignment: .center, spacing: 14) {
                 SpendGaugeView(presentation: presentation.primaryGauge)
                 VStack(alignment: .leading, spacing: 7) {
@@ -118,7 +130,7 @@ struct SpendPopoverView: View {
 
     private var modeSelector: some View {
         HStack(spacing: 6) {
-            ForEach(SpendPopoverMode.allCases) { mode in
+            ForEach(Self.modeSelectorModes) { mode in
                 selectorButton(
                     title: mode.displayName,
                     isSelected: viewModel.selectedPopoverMode == mode

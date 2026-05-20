@@ -188,6 +188,10 @@ public final class SpendDashboardViewModel {
         }
     }
 
+    public func openSettings(now: Date = Date()) async {
+        await selectPopoverMode(.settings, now: now)
+    }
+
     public func refreshKeyContext(now: Date = Date(), bypassingCache: Bool = false) async {
         guard let keyContextService, !isKeyContextRefreshing else {
             return

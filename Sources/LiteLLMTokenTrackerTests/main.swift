@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+@testable import LiteLLMTokenTrackerUI
 import LiteLLMTokenTrackerCore
 
 struct TestFailure: Error, CustomStringConvertible {
@@ -90,6 +92,48 @@ final class MutableAPIKeyStore: APIKeyStoring, @unchecked Sendable {
 
     func deleteAPIKey() throws {
         savedKeys.removeAll()
+    }
+}
+
+@MainActor
+final class RecordingStatusItemControllerHooks {
+    var primaryToggleCount = 0
+    var presentedMenuSnapshots: [StatusItemMenuSnapshot] = []
+    var settingsPopoverCount = 0
+    var terminateCount = 0
+
+    func makeController(viewModel: SpendDashboardViewModel) -> StatusItemController {
+        StatusItemController(
+            viewModel: viewModel,
+            popoverToggleAction: { self.primaryToggleCount += 1 },
+            contextMenuPopupAction: { menu in
+                self.presentedMenuSnapshots.append(StatusItemMenuSnapshot(menu: menu))
+            },
+            settingsPopoverAction: { self.settingsPopoverCount += 1 },
+            terminateAction: { self.terminateCount += 1 }
+        )
+    }
+}
+
+struct StatusItemMenuSnapshot: Equatable {
+    struct Item: Equatable {
+        let title: String
+        let isSeparator: Bool
+        let isEnabled: Bool
+        let action: StatusItemMenuAction?
+    }
+
+    let items: [Item]
+
+    init(menu: NSMenu) {
+        items = menu.items.map { item in
+            Item(
+                title: item.title,
+                isSeparator: item.isSeparatorItem,
+                isEnabled: item.isEnabled,
+                action: (item.representedObject as? String).flatMap(StatusItemMenuAction.init(rawValue:))
+            )
+        }
     }
 }
 
@@ -2629,9 +2673,142 @@ func testSelectingPopoverModeDoesNotRefreshSpend() async throws {
     try expectEqual(service.requestedRanges, [], "mode selection should not refresh spend")
 }
 
+@MainActor
+func testOpenSettingsSelectsSettingsMode() async throws {
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []))
+
+    await viewModel.openSettings()
+
+    try expectEqual(viewModel.selectedPopoverMode, .settings, "open settings should route to the existing settings mode")
+}
+
 func testPopoverModesExposeOverviewTrendsBreakdown() throws {
     try expectEqual(SpendPopoverMode.allCases, [.overview, .trends, .breakdown, .keys, .settings], "popover should expose analytics, key, and settings modes")
     try expectEqual(SpendPopoverMode.allCases.map(\.displayName), ["Overview", "Trends", "Breakdown", "Keys", "Settings"], "popover modes should have display names")
+}
+
+func testStatusItemMenuActionCasesAreStable() throws {
+    try expectEqual(StatusItemMenuAction.allCases, [.settings, .refresh, .exit], "status item menu action cases should stay stable")
+}
+
+func testPopoverHeaderKeepsSettingsModeAvailable() throws {
+    try expectEqual(SpendPopoverView.modeSelectorModes, [.overview, .trends, .breakdown, .keys, .settings], "popover header changes should keep Settings in the mode selector")
+    try expectEqual(PopoverHeaderAccessoryView.settingsSymbolName, "gearshape", "popover header should expose the settings cog symbol")
+}
+
+@MainActor
+func testAvailableMenuActionsExposeSettingsRefreshAndExitInOrder() throws {
+    let controller = StatusItemController(viewModel: SpendDashboardViewModel(spendService: RecordingSpendService(results: [])))
+
+    let actions = controller.availableMenuActions()
+
+    try expectEqual(actions.map(\.action), [.settings, .refresh, .exit], "status item menu actions should stay ordered")
+    try expect(actions.allSatisfy(\.isEnabled), "status item menu actions should default to enabled")
+}
+
+@MainActor
+func testRefreshMenuActionIsDisabledWhileRefreshIsRunning() throws {
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []))
+    let controller = StatusItemController(viewModel: viewModel)
+    viewModel.isRefreshing = true
+
+    let refreshAction = try actionsByMenuAction(controller.availableMenuActions())[.refresh].unwrap("refresh action")
+
+    try expect(!refreshAction.isEnabled, "refresh action should be disabled while a refresh is already running")
+}
+
+@MainActor
+func testHandlePrimaryClickUsesPopoverTogglePath() throws {
+    let hooks = RecordingStatusItemControllerHooks()
+    let controller = hooks.makeController(viewModel: SpendDashboardViewModel(spendService: RecordingSpendService(results: [])))
+
+    controller.handlePrimaryClick()
+
+    try expectEqual(hooks.primaryToggleCount, 1, "primary click should route through the popover toggle path")
+    try expectEqual(hooks.presentedMenuSnapshots.count, 0, "primary click should not present the context menu")
+}
+
+@MainActor
+func testHandleSecondaryClickUsesContextMenuPath() throws {
+    let hooks = RecordingStatusItemControllerHooks()
+    let controller = hooks.makeController(viewModel: SpendDashboardViewModel(spendService: RecordingSpendService(results: [])))
+
+    controller.handleSecondaryClick()
+
+    try expectEqual(hooks.primaryToggleCount, 0, "secondary click should not route through the popover toggle path")
+    try expectEqual(hooks.presentedMenuSnapshots.count, 1, "secondary click should present the context menu")
+    try expectEqual(
+        hooks.presentedMenuSnapshots[0].items,
+        [
+            StatusItemMenuSnapshot.Item(title: "Settings", isSeparator: false, isEnabled: true, action: .settings),
+            StatusItemMenuSnapshot.Item(title: "Refresh", isSeparator: false, isEnabled: true, action: .refresh),
+            StatusItemMenuSnapshot.Item(title: "", isSeparator: true, isEnabled: false, action: nil),
+            StatusItemMenuSnapshot.Item(title: "Exit", isSeparator: false, isEnabled: true, action: .exit)
+        ],
+        "secondary click should build the settings, refresh, separator, exit menu in order"
+    )
+}
+
+@MainActor
+func testHandleSecondaryClickDisablesRefreshInBuiltMenuWhileRefreshIsRunning() throws {
+    let hooks = RecordingStatusItemControllerHooks()
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []))
+    let controller = hooks.makeController(viewModel: viewModel)
+    viewModel.isRefreshing = true
+
+    controller.handleSecondaryClick()
+
+    let refreshItem = try hooks.presentedMenuSnapshots[0].items.first { $0.action == .refresh }.unwrap("refresh menu item")
+    try expect(!refreshItem.isEnabled, "secondary click should build a disabled refresh menu item while refresh is already running")
+}
+
+@MainActor
+func testPerformMenuActionSettingsOpensPopoverSettingsMode() async throws {
+    let hooks = RecordingStatusItemControllerHooks()
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []))
+    let controller = hooks.makeController(viewModel: viewModel)
+
+    await controller.performMenuAction(.settings)
+
+    try expectEqual(viewModel.selectedPopoverMode, .settings, "settings menu action should open the existing settings mode")
+    try expectEqual(hooks.settingsPopoverCount, 1, "settings menu action should show the popover through the controller boundary")
+}
+
+@MainActor
+func testPerformMenuActionRefreshUsesRefreshSelectedModePath() async throws {
+    let keySnapshot = KeyContextSnapshot(currentKey: keySummary(alias: "Claude Code", spend: 8), ownedKeys: [], refreshedAt: try fixedDate("2026-05-20"), isStale: false)
+    let keyService = RecordingKeyContextService(results: [.refreshed(keySnapshot), .refreshed(keySnapshot)])
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), keyContextService: keyService)
+    let controller = RecordingStatusItemControllerHooks().makeController(viewModel: viewModel)
+
+    await viewModel.selectPopoverMode(.keys, now: try fixedDate("2026-05-20"))
+    try expectEqual(keyService.requestedDates.count, 1, "keys mode setup should perform the initial lazy key refresh")
+
+    await controller.performMenuAction(.refresh)
+
+    try expectEqual(keyService.requestedDates.count, 2, "refresh menu action should reuse refreshSelectedMode for keys mode")
+}
+
+@MainActor
+func testPerformMenuActionExitTerminatesThroughApplicationBoundary() async throws {
+    let hooks = RecordingStatusItemControllerHooks()
+    let controller = hooks.makeController(viewModel: SpendDashboardViewModel(spendService: RecordingSpendService(results: [])))
+
+    await controller.performMenuAction(.exit)
+
+    try expectEqual(hooks.terminateCount, 1, "exit menu action should terminate through the application boundary")
+}
+
+@MainActor
+func testCogOpenSettingsIsIdempotent() async throws {
+    let service = RecordingSpendService(results: [])
+    let viewModel = SpendDashboardViewModel(spendService: service)
+
+    await viewModel.openSettings()
+    await viewModel.openSettings()
+
+    try expectEqual(viewModel.selectedPopoverMode, .settings, "settings cog should keep settings selected when invoked repeatedly")
+    try expectEqual(service.requestedRanges, [], "settings cog should not trigger a spend refresh")
 }
 
 @MainActor
@@ -2645,6 +2822,19 @@ func testKeysModeLoadsKeyContextLazily() async throws {
 
     try expectEqual(keyService.requestedDates.count, 1, "keys mode should lazily load key context")
     try expectEqual(viewModel.keyContextSnapshot, snapshot, "view model should store key context")
+}
+
+func actionsByMenuAction(_ actions: [StatusItemMenuActionState]) -> [StatusItemMenuAction: StatusItemMenuActionState] {
+    Dictionary(uniqueKeysWithValues: actions.map { ($0.action, $0) })
+}
+
+extension Optional {
+    func unwrap(_ description: String) throws -> Wrapped {
+        guard let self else {
+            throw TestFailure(description: "Missing \(description)")
+        }
+        return self
+    }
 }
 
 @MainActor
@@ -3254,7 +3444,14 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testMenuBarPreferenceFallsBackOnInvalidRawValue", testMenuBarPreferenceFallsBackOnInvalidRawValue),
     ("testMenuBarPreferenceMigratesLegacyKey", testMenuBarPreferenceMigratesLegacyKey),
     ("testMetricSelectorShowsDollarsAndPercentOptions", testMetricSelectorShowsDollarsAndPercentOptions),
-    ("testPopoverModesExposeOverviewTrendsBreakdown", testPopoverModesExposeOverviewTrendsBreakdown)
+    ("testPopoverModesExposeOverviewTrendsBreakdown", testPopoverModesExposeOverviewTrendsBreakdown),
+    ("testStatusItemMenuActionCasesAreStable", testStatusItemMenuActionCasesAreStable),
+    ("testPopoverHeaderKeepsSettingsModeAvailable", testPopoverHeaderKeepsSettingsModeAvailable),
+    ("testAvailableMenuActionsExposeSettingsRefreshAndExitInOrder", testAvailableMenuActionsExposeSettingsRefreshAndExitInOrder),
+    ("testRefreshMenuActionIsDisabledWhileRefreshIsRunning", testRefreshMenuActionIsDisabledWhileRefreshIsRunning),
+    ("testHandlePrimaryClickUsesPopoverTogglePath", testHandlePrimaryClickUsesPopoverTogglePath),
+    ("testHandleSecondaryClickUsesContextMenuPath", testHandleSecondaryClickUsesContextMenuPath),
+    ("testHandleSecondaryClickDisablesRefreshInBuiltMenuWhileRefreshIsRunning", testHandleSecondaryClickDisablesRefreshInBuiltMenuWhileRefreshIsRunning)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [
@@ -3332,6 +3529,11 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testMetricAndRangeControlsRemainIndependent", testMetricAndRangeControlsRemainIndependent),
     ("testDefaultPopoverModeIsOverview", testDefaultPopoverModeIsOverview),
     ("testSelectingPopoverModeDoesNotRefreshSpend", testSelectingPopoverModeDoesNotRefreshSpend),
+    ("testOpenSettingsSelectsSettingsMode", testOpenSettingsSelectsSettingsMode),
+    ("testPerformMenuActionSettingsOpensPopoverSettingsMode", testPerformMenuActionSettingsOpensPopoverSettingsMode),
+    ("testPerformMenuActionRefreshUsesRefreshSelectedModePath", testPerformMenuActionRefreshUsesRefreshSelectedModePath),
+    ("testPerformMenuActionExitTerminatesThroughApplicationBoundary", testPerformMenuActionExitTerminatesThroughApplicationBoundary),
+    ("testCogOpenSettingsIsIdempotent", testCogOpenSettingsIsIdempotent),
     ("testKeysModeLoadsKeyContextLazily", testKeysModeLoadsKeyContextLazily),
     ("testKeyContextUsesCachedUserIDFromAnalyticsRefresh", testKeyContextUsesCachedUserIDFromAnalyticsRefresh),
     ("testKeyContextFailurePreservesSpendSnapshot", testKeyContextFailurePreservesSpendSnapshot),
