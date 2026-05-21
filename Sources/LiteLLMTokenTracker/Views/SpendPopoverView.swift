@@ -19,6 +19,9 @@ struct SpendPopoverView: View {
 
         VStack(alignment: .leading, spacing: 14) {
             HStack {
+                Text(viewModel.currentVersionLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
                 Spacer()
                 PopoverHeaderAccessoryView {
                     Task {
