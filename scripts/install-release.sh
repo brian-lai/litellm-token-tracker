@@ -5,8 +5,15 @@ APP_NAME="LiteLLMTokenTracker"
 ASSET_NAME="${APP_NAME}-macos.zip"
 RELEASE_REPO="${RELEASE_REPO:-brian-lai/litellm_token_tracker}"
 RELEASE_METADATA_URL="${RELEASE_METADATA_URL:-https://api.github.com/repos/${RELEASE_REPO}/releases/latest}"
-INSTALL_DIR="${HOME}/Applications"
-INSTALL_PATH="${INSTALL_DIR}/${APP_NAME}.app"
+APP_BUNDLE="${APP_NAME}.app"
+USER_INSTALL_DIR="${HOME}/Applications"
+SYSTEM_INSTALL_DIR="${SYSTEM_APPLICATIONS_DIR:-/Applications}"
+USER_INSTALL_PATH="${USER_INSTALL_DIR}/${APP_BUNDLE}"
+SYSTEM_INSTALL_PATH="${SYSTEM_INSTALL_DIR}/${APP_BUNDLE}"
+
+note() {
+  printf 'INFO: %s\n' "$1"
+}
 
 fail() {
   printf 'ERROR: %s\n' "$1" >&2
@@ -23,6 +30,23 @@ require_cmd python3
 require_cmd unzip
 require_cmd mktemp
 require_cmd open
+
+resolve_install_path() {
+  if [[ -d "${USER_INSTALL_PATH}" ]]; then
+    printf '%s\n' "${USER_INSTALL_PATH}"
+    return 0
+  fi
+
+  if [[ -d "${SYSTEM_INSTALL_PATH}" ]]; then
+    if [[ -w "${SYSTEM_INSTALL_DIR}" || -w "${SYSTEM_INSTALL_PATH}" ]]; then
+      printf '%s\n' "${SYSTEM_INSTALL_PATH}"
+      return 0
+    fi
+    note "found existing app at ${SYSTEM_INSTALL_PATH} but it is not writable; installing to ${USER_INSTALL_PATH} instead"
+  fi
+
+  printf '%s\n' "${USER_INSTALL_PATH}"
+}
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/litellm-install-release.XXXXXX")"
 cleanup() {
@@ -75,6 +99,8 @@ fi
 EXTRACTED_APP="${EXTRACT_DIR}/${APP_NAME}.app"
 [[ -d "${EXTRACTED_APP}" ]] || fail "archive missing expected app bundle: ${APP_NAME}.app"
 
+INSTALL_PATH="$(resolve_install_path)"
+INSTALL_DIR="$(dirname "${INSTALL_PATH}")"
 mkdir -p "${INSTALL_DIR}"
 rm -rf "${INSTALL_PATH}"
 mv "${EXTRACTED_APP}" "${INSTALL_PATH}"

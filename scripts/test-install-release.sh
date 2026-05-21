@@ -72,13 +72,15 @@ run_installer_case() {
   local expect_exit="$6"
   local expect_contains="$7"
   local use_default_metadata_url="${8:-0}"
+  local install_location="${9:-user}"
 
   local case_dir
   case_dir="$(mktemp -d "${TMPDIR:-/tmp}/litellm-install-test-${case_name}.XXXXXX")"
   local app_home="${case_dir}/home"
+  local system_apps="${case_dir}/system-apps"
   local mock_bin="${case_dir}/mock-bin"
   local work_dir="${case_dir}/work"
-  mkdir -p "${app_home}/Applications" "${mock_bin}" "${work_dir}" "${case_dir}/fixtures"
+  mkdir -p "${app_home}/Applications" "${system_apps}" "${mock_bin}" "${work_dir}" "${case_dir}/fixtures"
 
   local metadata_path="${FIXTURE_DIR}/${metadata_fixture}"
   local success_template="${FIXTURE_DIR}/release-success.json"
@@ -87,7 +89,13 @@ run_installer_case() {
   local bad_zip_path="${case_dir}/fixtures/not-a-zip.zip"
   local metadata_url="https://api.github.com/repos/brian-lai/litellm_token_tracker/releases/latest"
   local asset_url="https://download.example.invalid/LiteLLMTokenTracker-macos.zip"
-  local existing_marker="${app_home}/Applications/LiteLLMTokenTracker.app/existing.txt"
+  local install_root
+  if [[ "${install_location}" == "system" ]]; then
+    install_root="${system_apps}"
+  else
+    install_root="${app_home}/Applications"
+  fi
+  local existing_marker="${install_root}/LiteLLMTokenTracker.app/existing.txt"
   local out_file="${case_dir}/out.log"
 
   if [[ "${metadata_fixture}" == "release-success.json" ]]; then
@@ -108,7 +116,7 @@ run_installer_case() {
       ;;
   esac
 
-  mkdir -p "${app_home}/Applications/LiteLLMTokenTracker.app"
+  mkdir -p "${install_root}/LiteLLMTokenTracker.app"
   printf 'legacy\n' > "${existing_marker}"
 
   cat > "${mock_bin}/curl" <<'EOF'
@@ -180,6 +188,7 @@ EOF
       MOCK_BAD_ZIP_PATH="${bad_zip_path}" \
       MOCK_ASSET_MODE="${asset_zip_mode}" \
       MOCK_OPEN_EXIT="${open_exit}" \
+      SYSTEM_APPLICATIONS_DIR="${system_apps}" \
       "${INSTALL_SCRIPT}"
     ) >"${out_file}" 2>&1
   else
@@ -196,6 +205,7 @@ EOF
       MOCK_OPEN_EXIT="${open_exit}" \
       RELEASE_METADATA_URL="${metadata_url}" \
       RELEASE_REPO="brian-lai/litellm_token_tracker" \
+      SYSTEM_APPLICATIONS_DIR="${system_apps}" \
       "${INSTALL_SCRIPT}"
     ) >"${out_file}" 2>&1
   fi
@@ -208,14 +218,14 @@ EOF
   assert_contains "${output}" "${expect_contains}" "${case_name} output"
 
   if [[ "${case_name}" == "success" ]]; then
-    assert_dir_exists "${app_home}/Applications/LiteLLMTokenTracker.app" "${case_name} install dir"
-    assert_file_exists "${app_home}/Applications/LiteLLMTokenTracker.app/Contents/MacOS/LiteLLMTokenTracker" "${case_name} executable"
+    assert_dir_exists "${install_root}/LiteLLMTokenTracker.app" "${case_name} install dir"
+    assert_file_exists "${install_root}/LiteLLMTokenTracker.app/Contents/MacOS/LiteLLMTokenTracker" "${case_name} executable"
     assert_not_contains "${output}" "existing.txt" "${case_name} output safety"
   fi
 
   if [[ "${case_name}" == "replace_existing_app" ]]; then
     [[ ! -f "${existing_marker}" ]] || fail "${case_name}: existing app marker should be replaced"
-    assert_file_exists "${app_home}/Applications/LiteLLMTokenTracker.app/Contents/MacOS/LiteLLMTokenTracker" "${case_name} executable"
+    assert_file_exists "${install_root}/LiteLLMTokenTracker.app/Contents/MacOS/LiteLLMTokenTracker" "${case_name} executable"
   fi
 
   rm -rf "${case_dir}"
@@ -228,6 +238,7 @@ run_installer_case "bad_zip" "release-success.json" "bad_zip" "0" "0" "1" "unzip
 run_installer_case "missing_bundle" "release-success.json" "missing_bundle" "0" "0" "1" "LiteLLMTokenTracker.app"
 run_installer_case "missing_python3" "release-success.json" "good" "0" "1" "1" "required command not found: python3"
 run_installer_case "replace_existing_app" "release-success.json" "good" "0" "0" "0" "Installed LiteLLMTokenTracker.app"
+run_installer_case "replace_existing_system_app" "release-success.json" "good" "0" "0" "0" "Installed LiteLLMTokenTracker.app" "0" "system"
 run_installer_case "launch_failure" "release-success.json" "good" "1" "0" "1" "launch"
 run_installer_case "default_metadata_url" "release-success.json" "good" "0" "0" "0" "Installed LiteLLMTokenTracker.app" "1"
 
