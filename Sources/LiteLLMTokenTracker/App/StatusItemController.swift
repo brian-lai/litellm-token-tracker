@@ -92,16 +92,20 @@ public final class StatusItemController: NSObject {
     }
 
     func availableMenuActions() -> [StatusItemMenuActionState] {
+        let hasUpdate = viewModel.availableUpdateURL != nil
         var actions = [
             StatusItemMenuActionState(action: .settings, isEnabled: true),
             StatusItemMenuActionState(
                 action: .refresh,
                 isEnabled: !(viewModel.isRefreshing || viewModel.isKeyContextRefreshing)
+            ),
+            StatusItemMenuActionState(action: .checkForUpdates, isEnabled: true),
+            StatusItemMenuActionState(
+                action: .update,
+                title: hasUpdate ? "Update..." : "Up to Date",
+                isEnabled: hasUpdate
             )
         ]
-        if viewModel.availableUpdateURL != nil {
-            actions.append(StatusItemMenuActionState(action: .update, isEnabled: true))
-        }
         actions.append(StatusItemMenuActionState(action: .exit, isEnabled: true))
         return actions
     }
@@ -129,6 +133,8 @@ public final class StatusItemController: NSObject {
             showSettingsPopover()
         case .refresh:
             await viewModel.refreshSelectedMode()
+        case .checkForUpdates:
+            await viewModel.refreshReleaseAvailability()
         case .update:
             guard let releaseURL = viewModel.availableUpdateURL else {
                 return
@@ -183,7 +189,7 @@ public final class StatusItemController: NSObject {
             if actionState.action == .exit {
                 menu.addItem(.separator())
             }
-            let item = NSMenuItem(title: actionState.action.menuTitle, action: #selector(handleContextMenuSelection(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: actionState.title, action: #selector(handleContextMenuSelection(_:)), keyEquivalent: "")
             item.target = self
             item.isEnabled = actionState.isEnabled
             item.representedObject = actionState.action.rawValue

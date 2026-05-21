@@ -97,13 +97,15 @@ final class MutableAPIKeyStore: APIKeyStoring, @unchecked Sendable {
 
 final class StubReleaseUpdateChecker: ReleaseUpdateChecking, @unchecked Sendable {
     var resultURL: URL?
+    private(set) var checkedVersions: [String] = []
 
     init(resultURL: URL? = nil) {
         self.resultURL = resultURL
     }
 
     func checkForUpdate(currentVersion: String) async -> URL? {
-        resultURL
+        checkedVersions.append(currentVersion)
+        return resultURL
     }
 }
 
@@ -2800,7 +2802,7 @@ func testPopoverModesExposeOverviewTrendsBreakdown() throws {
 }
 
 func testStatusItemMenuActionCasesAreStable() throws {
-    try expectEqual(StatusItemMenuAction.allCases, [.settings, .refresh, .update, .exit], "status item menu action cases should stay stable")
+    try expectEqual(StatusItemMenuAction.allCases, [.settings, .refresh, .checkForUpdates, .update, .exit], "status item menu action cases should stay stable")
 }
 
 func testPopoverHeaderKeepsSettingsModeAvailable() throws {
@@ -2814,8 +2816,10 @@ func testAvailableMenuActionsExposeSettingsRefreshAndExitInOrder() throws {
 
     let actions = controller.availableMenuActions()
 
-    try expectEqual(actions.map(\.action), [.settings, .refresh, .exit], "status item menu actions should stay ordered")
-    try expect(actions.allSatisfy(\.isEnabled), "status item menu actions should default to enabled")
+    try expectEqual(actions.map(\.action), [.settings, .refresh, .checkForUpdates, .update, .exit], "status item menu actions should stay ordered")
+    try expectEqual(actions.map(\.title), ["Settings", "Refresh", "Check for Updates...", "Up to Date", "Exit"], "status item menu actions should expose update status and check command")
+    let updateAction = try actionsByMenuAction(actions)[.update].unwrap("update action")
+    try expect(!updateAction.isEnabled, "update action should be disabled when no newer release is detected")
 }
 
 @MainActor
@@ -2831,11 +2835,17 @@ func testAvailableMenuActionsShowsUpdateOnlyWhenReleaseDetected() async throws {
     )
     let controller = StatusItemController(viewModel: viewModel)
 
-    try expectEqual(controller.availableMenuActions().map(\.action), [.settings, .refresh, .exit], "before detection, update action should not be shown")
+    let beforeActions = controller.availableMenuActions()
+    try expectEqual(beforeActions.map(\.action), [.settings, .refresh, .checkForUpdates, .update, .exit], "before detection, menu should include update status and check command")
+    try expectEqual(beforeActions.map(\.title), ["Settings", "Refresh", "Check for Updates...", "Up to Date", "Exit"], "before detection, update status should show up-to-date")
 
     await viewModel.refreshReleaseAvailability()
 
-    try expectEqual(controller.availableMenuActions().map(\.action), [.settings, .refresh, .update, .exit], "after detecting a newer release, update action should be shown before exit")
+    let afterActions = controller.availableMenuActions()
+    try expectEqual(afterActions.map(\.action), [.settings, .refresh, .checkForUpdates, .update, .exit], "after detecting a newer release, action ordering should remain stable")
+    try expectEqual(afterActions.map(\.title), ["Settings", "Refresh", "Check for Updates...", "Update...", "Exit"], "after detecting a newer release, update status should become actionable")
+    let updateAction = try actionsByMenuAction(afterActions)[.update].unwrap("update action")
+    try expect(updateAction.isEnabled, "update action should become enabled after detection")
 }
 
 @MainActor
@@ -2874,10 +2884,12 @@ func testHandleSecondaryClickUsesContextMenuPath() throws {
         [
             StatusItemMenuSnapshot.Item(title: "Settings", isSeparator: false, isEnabled: true, action: .settings),
             StatusItemMenuSnapshot.Item(title: "Refresh", isSeparator: false, isEnabled: true, action: .refresh),
+            StatusItemMenuSnapshot.Item(title: "Check for Updates...", isSeparator: false, isEnabled: true, action: .checkForUpdates),
+            StatusItemMenuSnapshot.Item(title: "Up to Date", isSeparator: false, isEnabled: false, action: .update),
             StatusItemMenuSnapshot.Item(title: "", isSeparator: true, isEnabled: false, action: nil),
             StatusItemMenuSnapshot.Item(title: "Exit", isSeparator: false, isEnabled: true, action: .exit)
         ],
-        "secondary click should build the settings, refresh, separator, exit menu in order"
+        "secondary click should build the settings, refresh, update status, and exit menu in order"
     )
 }
 
@@ -2902,11 +2914,12 @@ func testHandleSecondaryClickShowsUpdateItemWhenAvailable() async throws {
         [
             StatusItemMenuSnapshot.Item(title: "Settings", isSeparator: false, isEnabled: true, action: .settings),
             StatusItemMenuSnapshot.Item(title: "Refresh", isSeparator: false, isEnabled: true, action: .refresh),
-            StatusItemMenuSnapshot.Item(title: "Update", isSeparator: false, isEnabled: true, action: .update),
+            StatusItemMenuSnapshot.Item(title: "Check for Updates...", isSeparator: false, isEnabled: true, action: .checkForUpdates),
+            StatusItemMenuSnapshot.Item(title: "Update...", isSeparator: false, isEnabled: true, action: .update),
             StatusItemMenuSnapshot.Item(title: "", isSeparator: true, isEnabled: false, action: nil),
             StatusItemMenuSnapshot.Item(title: "Exit", isSeparator: false, isEnabled: true, action: .exit)
         ],
-        "secondary click should include update item only when update is available"
+        "secondary click should include check action and an enabled update item when update is available"
     )
 }
 
@@ -2951,6 +2964,21 @@ func testPerformMenuActionRefreshUsesRefreshSelectedModePath() async throws {
 }
 
 @MainActor
+func testPerformMenuActionCheckForUpdatesTriggersReleaseCheck() async throws {
+    let checker = StubReleaseUpdateChecker()
+    let viewModel = SpendDashboardViewModel(
+        spendService: RecordingSpendService(results: []),
+        releaseUpdateChecker: checker,
+        appVersion: "0.2.0"
+    )
+    let controller = RecordingStatusItemControllerHooks().makeController(viewModel: viewModel)
+
+    await controller.performMenuAction(.checkForUpdates)
+
+    try expectEqual(checker.checkedVersions, ["0.2.0"], "check for updates should call the release checker with the running app version")
+}
+
+@MainActor
 func testPerformMenuActionExitTerminatesThroughApplicationBoundary() async throws {
     let hooks = RecordingStatusItemControllerHooks()
     let controller = hooks.makeController(viewModel: SpendDashboardViewModel(spendService: RecordingSpendService(results: [])))
@@ -2977,6 +3005,21 @@ func testPerformMenuActionUpdateOpensReleaseURL() async throws {
     await controller.performMenuAction(.update)
 
     try expectEqual(hooks.openedURLs, [updateURL], "update menu action should open the detected release URL")
+}
+
+@MainActor
+func testCurrentVersionLabelFormatsAppVersionForPopoverHeader() throws {
+    let plainVersionViewModel = SpendDashboardViewModel(
+        spendService: RecordingSpendService(results: []),
+        appVersion: "1.2.3"
+    )
+    let prefixedVersionViewModel = SpendDashboardViewModel(
+        spendService: RecordingSpendService(results: []),
+        appVersion: "v2.0.0"
+    )
+
+    try expectEqual(plainVersionViewModel.currentVersionLabel, "v1.2.3", "plain app versions should be prefixed for popover display")
+    try expectEqual(prefixedVersionViewModel.currentVersionLabel, "v2.0.0", "already-prefixed app versions should stay unchanged")
 }
 
 @MainActor
@@ -3628,6 +3671,7 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testStatusItemMenuActionCasesAreStable", testStatusItemMenuActionCasesAreStable),
     ("testPopoverHeaderKeepsSettingsModeAvailable", testPopoverHeaderKeepsSettingsModeAvailable),
     ("testAvailableMenuActionsExposeSettingsRefreshAndExitInOrder", testAvailableMenuActionsExposeSettingsRefreshAndExitInOrder),
+    ("testCurrentVersionLabelFormatsAppVersionForPopoverHeader", testCurrentVersionLabelFormatsAppVersionForPopoverHeader),
     ("testRefreshMenuActionIsDisabledWhileRefreshIsRunning", testRefreshMenuActionIsDisabledWhileRefreshIsRunning),
     ("testHandlePrimaryClickUsesPopoverTogglePath", testHandlePrimaryClickUsesPopoverTogglePath),
     ("testHandleSecondaryClickUsesContextMenuPath", testHandleSecondaryClickUsesContextMenuPath),
@@ -3718,6 +3762,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testAvailableMenuActionsShowsUpdateOnlyWhenReleaseDetected", testAvailableMenuActionsShowsUpdateOnlyWhenReleaseDetected),
     ("testPerformMenuActionSettingsOpensPopoverSettingsMode", testPerformMenuActionSettingsOpensPopoverSettingsMode),
     ("testPerformMenuActionRefreshUsesRefreshSelectedModePath", testPerformMenuActionRefreshUsesRefreshSelectedModePath),
+    ("testPerformMenuActionCheckForUpdatesTriggersReleaseCheck", testPerformMenuActionCheckForUpdatesTriggersReleaseCheck),
     ("testPerformMenuActionExitTerminatesThroughApplicationBoundary", testPerformMenuActionExitTerminatesThroughApplicationBoundary),
     ("testHandleSecondaryClickShowsUpdateItemWhenAvailable", testHandleSecondaryClickShowsUpdateItemWhenAvailable),
     ("testPerformMenuActionUpdateOpensReleaseURL", testPerformMenuActionUpdateOpensReleaseURL),

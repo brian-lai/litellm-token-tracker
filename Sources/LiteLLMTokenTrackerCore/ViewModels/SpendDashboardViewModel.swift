@@ -37,6 +37,17 @@ public final class SpendDashboardViewModel {
         menuBarPresentation.label
     }
 
+    public var currentVersionLabel: String {
+        let trimmed = appVersion.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return "v0.0.0"
+        }
+        if trimmed.hasPrefix("v") || trimmed.hasPrefix("V") {
+            return trimmed
+        }
+        return "v\(trimmed)"
+    }
+
     public var menuBarPresentation: MenuBarSpendPresentation {
         MenuBarSpendPresentation.make(
             menuBarSnapshot: menuBarSnapshot,
