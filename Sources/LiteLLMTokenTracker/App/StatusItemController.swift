@@ -12,6 +12,7 @@ public final class StatusItemController: NSObject {
     private let contextMenuPopupAction: ((NSMenu) -> Void)?
     private let settingsPopoverAction: (() -> Void)?
     private let terminateAction: () -> Void
+    private let installReleaseAction: () -> Bool
     private let openURLAction: (URL) -> Void
     private var activeContextMenu: NSMenu?
 
@@ -22,6 +23,7 @@ public final class StatusItemController: NSObject {
             contextMenuPopupAction: nil,
             settingsPopoverAction: nil,
             terminateAction: nil,
+            installReleaseAction: nil,
             openURLAction: nil
         )
     }
@@ -32,6 +34,7 @@ public final class StatusItemController: NSObject {
         contextMenuPopupAction: ((NSMenu) -> Void)? = nil,
         settingsPopoverAction: (() -> Void)? = nil,
         terminateAction: (() -> Void)? = nil,
+        installReleaseAction: (() -> Bool)? = nil,
         openURLAction: ((URL) -> Void)? = nil
     ) {
         self.viewModel = viewModel
@@ -40,6 +43,9 @@ public final class StatusItemController: NSObject {
         self.contextMenuPopupAction = contextMenuPopupAction
         self.settingsPopoverAction = settingsPopoverAction
         self.terminateAction = terminateAction ?? { NSApp.terminate(nil) }
+        self.installReleaseAction = installReleaseAction ?? {
+            ReleaseInstaller.launchBackgroundInstallFromGitHub()
+        }
         self.openURLAction = openURLAction ?? { url in
             NSWorkspace.shared.open(url)
         }
@@ -139,7 +145,11 @@ public final class StatusItemController: NSObject {
             guard let releaseURL = viewModel.availableUpdateURL else {
                 return
             }
-            openURLAction(releaseURL)
+            if installReleaseAction() {
+                terminateAction()
+            } else {
+                openURLAction(releaseURL)
+            }
         case .exit:
             terminateAction()
         }
@@ -214,6 +224,26 @@ public final class StatusItemController: NSObject {
         }
         Task { @MainActor in
             await performMenuAction(action)
+        }
+    }
+}
+
+private enum ReleaseInstaller {
+    private static let installScriptURL = "https://raw.githubusercontent.com/brian-lai/litellm-token-tracker/main/scripts/install-release.sh"
+
+    static func launchBackgroundInstallFromGitHub() -> Bool {
+        let command = "sleep 1; curl -fsSL \(installScriptURL) | bash"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-lc", command]
+        process.standardOutput = nil
+        process.standardError = nil
+
+        do {
+            try process.run()
+            return true
+        } catch {
+            return false
         }
     }
 }
