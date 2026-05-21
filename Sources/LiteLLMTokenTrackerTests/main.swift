@@ -115,6 +115,8 @@ final class RecordingStatusItemControllerHooks {
     var presentedMenuSnapshots: [StatusItemMenuSnapshot] = []
     var settingsPopoverCount = 0
     var terminateCount = 0
+    var installReleaseInvocationCount = 0
+    var installReleaseResult = true
     var openedURLs: [URL] = []
 
     func makeController(viewModel: SpendDashboardViewModel) -> StatusItemController {
@@ -126,6 +128,10 @@ final class RecordingStatusItemControllerHooks {
             },
             settingsPopoverAction: { self.settingsPopoverCount += 1 },
             terminateAction: { self.terminateCount += 1 },
+            installReleaseAction: {
+                self.installReleaseInvocationCount += 1
+                return self.installReleaseResult
+            },
             openURLAction: { url in self.openedURLs.append(url) }
         )
     }
@@ -2989,7 +2995,7 @@ func testPerformMenuActionExitTerminatesThroughApplicationBoundary() async throw
 }
 
 @MainActor
-func testPerformMenuActionUpdateOpensReleaseURL() async throws {
+func testPerformMenuActionUpdateRunsInstallerAndTerminates() async throws {
     let hooks = RecordingStatusItemControllerHooks()
     guard let updateURL = URL(string: "https://github.com/brian-lai/litellm-token-tracker/releases/tag/v9.9.9") else {
         throw TestFailure(description: "invalid update URL fixture")
@@ -3004,7 +3010,31 @@ func testPerformMenuActionUpdateOpensReleaseURL() async throws {
 
     await controller.performMenuAction(.update)
 
-    try expectEqual(hooks.openedURLs, [updateURL], "update menu action should open the detected release URL")
+    try expectEqual(hooks.installReleaseInvocationCount, 1, "update menu action should launch the release installer")
+    try expectEqual(hooks.terminateCount, 1, "successful installer launch should terminate the running app to allow replacement")
+    try expectEqual(hooks.openedURLs, [], "successful installer launch should not open browser release URL")
+}
+
+@MainActor
+func testPerformMenuActionUpdateFallsBackToReleaseURLWhenInstallerFails() async throws {
+    let hooks = RecordingStatusItemControllerHooks()
+    hooks.installReleaseResult = false
+    guard let updateURL = URL(string: "https://github.com/brian-lai/litellm-token-tracker/releases/tag/v9.9.9") else {
+        throw TestFailure(description: "invalid update URL fixture")
+    }
+    let viewModel = SpendDashboardViewModel(
+        spendService: RecordingSpendService(results: []),
+        releaseUpdateChecker: StubReleaseUpdateChecker(resultURL: updateURL),
+        appVersion: "0.1.0"
+    )
+    let controller = hooks.makeController(viewModel: viewModel)
+    await viewModel.refreshReleaseAvailability()
+
+    await controller.performMenuAction(.update)
+
+    try expectEqual(hooks.installReleaseInvocationCount, 1, "update menu action should attempt installer before fallback")
+    try expectEqual(hooks.terminateCount, 0, "failed installer launch should not terminate app")
+    try expectEqual(hooks.openedURLs, [updateURL], "failed installer launch should fall back to opening release URL")
 }
 
 @MainActor
@@ -3765,7 +3795,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testPerformMenuActionCheckForUpdatesTriggersReleaseCheck", testPerformMenuActionCheckForUpdatesTriggersReleaseCheck),
     ("testPerformMenuActionExitTerminatesThroughApplicationBoundary", testPerformMenuActionExitTerminatesThroughApplicationBoundary),
     ("testHandleSecondaryClickShowsUpdateItemWhenAvailable", testHandleSecondaryClickShowsUpdateItemWhenAvailable),
-    ("testPerformMenuActionUpdateOpensReleaseURL", testPerformMenuActionUpdateOpensReleaseURL),
+    ("testPerformMenuActionUpdateRunsInstallerAndTerminates", testPerformMenuActionUpdateRunsInstallerAndTerminates),
+    ("testPerformMenuActionUpdateFallsBackToReleaseURLWhenInstallerFails", testPerformMenuActionUpdateFallsBackToReleaseURLWhenInstallerFails),
     ("testCogOpenSettingsIsIdempotent", testCogOpenSettingsIsIdempotent),
     ("testKeysModeLoadsKeyContextLazily", testKeysModeLoadsKeyContextLazily),
     ("testKeyContextUsesCachedUserIDFromAnalyticsRefresh", testKeyContextUsesCachedUserIDFromAnalyticsRefresh),
