@@ -109,7 +109,7 @@ The app creates the config directory with `0700` permissions and the key/config 
 On startup, the app resolves configuration in this order:
 
 1. Persisted files under `~/.config/litellm_token_tracker/`
-2. Legacy files under `~/.config/jw_tokens/` and migrates them forward
+2. Legacy files from earlier local versions are migrated forward automatically
 3. Environment variables:
    - `LITELLM_BASE_URL`
    - `LITELLM_API_KEY`

@@ -54,8 +54,8 @@ public struct SpendPopoverPresentation: Equatable, Sendable {
         calendar: Calendar = .current
     ) -> SpendPopoverPresentation {
         let total = snapshot?.totalSpendUSD ?? 0
-        let limit = snapshot?.limitUSD ?? 80
-        let overLimit = total > limit
+        let budget = snapshot?.limitUSD ?? 80
+        let overBudget = total > budget
         let analyticsRows = analyticsDetailRows(for: snapshot?.analytics)
         return SpendPopoverPresentation(
             primaryGauge: RingProgressPresentation.make(
@@ -67,13 +67,13 @@ public struct SpendPopoverPresentation: Equatable, Sendable {
             rangeName: range.longDisplayName,
             totalText: MenuBarTitleFormatter.currency(total),
             percentText: MenuBarTitleFormatter.percent(snapshot?.percentOfLimit ?? 0),
-            limitText: "Limit \(MenuBarTitleFormatter.currency(limit))",
-            overLimitText: overLimit ? "\(MenuBarTitleFormatter.currency(total - limit)) over limit" : nil,
+            limitText: "Budget \(MenuBarTitleFormatter.currency(budget))",
+            overLimitText: overBudget ? "\(MenuBarTitleFormatter.currency(total - budget)) over budget" : nil,
             refreshedText: refreshedText(for: snapshot?.refreshedAt, calendar: calendar),
             detailRows: [
                 DetailRow(label: "Spend", value: MenuBarTitleFormatter.currency(total)),
                 DetailRow(label: "Usage", value: MenuBarTitleFormatter.percent(snapshot?.percentOfLimit ?? 0)),
-                DetailRow(label: "Limit", value: MenuBarTitleFormatter.currency(limit)),
+                DetailRow(label: "Budget", value: MenuBarTitleFormatter.currency(budget)),
                 DetailRow(label: "Updated", value: refreshedText(for: snapshot?.refreshedAt, calendar: calendar).replacingOccurrences(of: "Updated ", with: ""))
             ] + analyticsRows,
             statusText: errorMessage,

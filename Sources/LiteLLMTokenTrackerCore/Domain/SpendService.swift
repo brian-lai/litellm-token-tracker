@@ -34,13 +34,18 @@ public struct SpendService: SpendServicing {
             let client = clientFactory(baseURL, apiKey)
             let user = try await client.fetchCurrentUser()
             let dateRange = rangeResolver.dateRange(for: range, now: now, calendar: calendar)
+            let rangeBudgetUSD = budgetForRange(
+                dailyBudgetUSD: configuration.spendLimitUSD,
+                dateRange: dateRange,
+                calendar: calendar
+            )
             let snapshot: SpendSnapshot
             do {
                 let analytics = try await client.fetchUserDailyActivity(range: dateRange, userID: user.userID)
                 snapshot = SpendAggregator.snapshot(
                     analytics: analytics,
                     range: range,
-                    limitUSD: configuration.spendLimitUSD,
+                    limitUSD: rangeBudgetUSD,
                     refreshedAt: now,
                     userContext: user
                 )
@@ -50,7 +55,7 @@ public struct SpendService: SpendServicing {
                     rows: rows,
                     range: range,
                     dateRange: dateRange,
-                    limitUSD: configuration.spendLimitUSD,
+                    limitUSD: rangeBudgetUSD,
                     refreshedAt: now
                 )
                 let analytics = SpendAnalyticsSummary(
@@ -94,5 +99,13 @@ public struct SpendService: SpendServicing {
 
     private func cacheScope(baseURL: URL, apiKey: String) -> String {
         "\(baseURL.absoluteString)|\(apiKey.hashValue)"
+    }
+
+    private func budgetForRange(dailyBudgetUSD: Decimal, dateRange: DateRange, calendar: Calendar) -> Decimal {
+        let start = calendar.startOfDay(for: dateRange.startDate)
+        let end = calendar.startOfDay(for: dateRange.endDate)
+        let dayDelta = calendar.dateComponents([.day], from: start, to: end).day ?? 1
+        let dayCount = max(1, dayDelta)
+        return dailyBudgetUSD * Decimal(dayCount)
     }
 }

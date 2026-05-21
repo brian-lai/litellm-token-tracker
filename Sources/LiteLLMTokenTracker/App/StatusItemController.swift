@@ -12,6 +12,7 @@ public final class StatusItemController: NSObject {
     private let contextMenuPopupAction: ((NSMenu) -> Void)?
     private let settingsPopoverAction: (() -> Void)?
     private let terminateAction: () -> Void
+    private let openURLAction: (URL) -> Void
     private var activeContextMenu: NSMenu?
 
     public convenience init(viewModel: SpendDashboardViewModel) {
@@ -20,7 +21,8 @@ public final class StatusItemController: NSObject {
             popoverToggleAction: nil,
             contextMenuPopupAction: nil,
             settingsPopoverAction: nil,
-            terminateAction: nil
+            terminateAction: nil,
+            openURLAction: nil
         )
     }
 
@@ -29,7 +31,8 @@ public final class StatusItemController: NSObject {
         popoverToggleAction: (() -> Void)? = nil,
         contextMenuPopupAction: ((NSMenu) -> Void)? = nil,
         settingsPopoverAction: (() -> Void)? = nil,
-        terminateAction: (() -> Void)? = nil
+        terminateAction: (() -> Void)? = nil,
+        openURLAction: ((URL) -> Void)? = nil
     ) {
         self.viewModel = viewModel
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -37,6 +40,9 @@ public final class StatusItemController: NSObject {
         self.contextMenuPopupAction = contextMenuPopupAction
         self.settingsPopoverAction = settingsPopoverAction
         self.terminateAction = terminateAction ?? { NSApp.terminate(nil) }
+        self.openURLAction = openURLAction ?? { url in
+            NSWorkspace.shared.open(url)
+        }
         super.init()
         configureStatusItem()
         configurePopover()
@@ -86,14 +92,18 @@ public final class StatusItemController: NSObject {
     }
 
     func availableMenuActions() -> [StatusItemMenuActionState] {
-        [
+        var actions = [
             StatusItemMenuActionState(action: .settings, isEnabled: true),
             StatusItemMenuActionState(
                 action: .refresh,
                 isEnabled: !(viewModel.isRefreshing || viewModel.isKeyContextRefreshing)
-            ),
-            StatusItemMenuActionState(action: .exit, isEnabled: true)
+            )
         ]
+        if viewModel.availableUpdateURL != nil {
+            actions.append(StatusItemMenuActionState(action: .update, isEnabled: true))
+        }
+        actions.append(StatusItemMenuActionState(action: .exit, isEnabled: true))
+        return actions
     }
 
     func handlePrimaryClick() {
@@ -119,6 +129,11 @@ public final class StatusItemController: NSObject {
             showSettingsPopover()
         case .refresh:
             await viewModel.refreshSelectedMode()
+        case .update:
+            guard let releaseURL = viewModel.availableUpdateURL else {
+                return
+            }
+            openURLAction(releaseURL)
         case .exit:
             terminateAction()
         }

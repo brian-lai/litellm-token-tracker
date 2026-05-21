@@ -9,6 +9,8 @@ public final class SpendDashboardViewModel {
     private let apiKeyStore: APIKeyStoring?
     private let menuBarPreferenceStore: MenuBarPreferenceStoring?
     private let configurationStore: MutableAppConfigurationStoring?
+    private let releaseUpdateChecker: ReleaseUpdateChecking?
+    private let appVersion: String
     private var endpointStateGeneration = 0
 
     public var selectedRange: SpendRange = .today
@@ -29,6 +31,7 @@ public final class SpendDashboardViewModel {
     public var baseURLDraft = ""
     public var settingsErrorMessage: String?
     public var menuBarMetric: MenuBarMetric
+    public var availableUpdateURL: URL?
 
     public var menuBarTitle: String {
         menuBarPresentation.label
@@ -47,18 +50,30 @@ public final class SpendDashboardViewModel {
         keyContextService: KeyContextServicing? = nil,
         apiKeyStore: APIKeyStoring? = nil,
         menuBarPreferenceStore: MenuBarPreferenceStoring? = nil,
-        configurationStore: MutableAppConfigurationStoring? = nil
+        configurationStore: MutableAppConfigurationStoring? = nil,
+        releaseUpdateChecker: ReleaseUpdateChecking? = nil,
+        appVersion: String = "0.0.0"
     ) {
         self.spendService = spendService
         self.keyContextService = keyContextService
         self.apiKeyStore = apiKeyStore
         self.menuBarPreferenceStore = menuBarPreferenceStore
         self.configurationStore = configurationStore
+        self.releaseUpdateChecker = releaseUpdateChecker
+        self.appVersion = appVersion
         self.menuBarMetric = (try? menuBarPreferenceStore?.loadMetric()) ?? .dollars
         let configuration = (try? configurationStore?.loadConfiguration()) ?? AppConfiguration()
         self.spendLimitDraft = NSDecimalNumber(decimal: configuration.spendLimitUSD).stringValue
         self.baseURLDraft = configuration.baseURL?.absoluteString ?? ""
         syncSetupState(preservingCurrentError: false)
+    }
+
+    public func refreshReleaseAvailability() async {
+        guard let releaseUpdateChecker else {
+            availableUpdateURL = nil
+            return
+        }
+        availableUpdateURL = await releaseUpdateChecker.checkForUpdate(currentVersion: appVersion)
     }
 
     public func refresh(now: Date = Date(), calendar: Calendar = .current, isAutomatic: Bool = false) async {
@@ -124,7 +139,7 @@ public final class SpendDashboardViewModel {
     public func saveSpendLimit() {
         let trimmedValue = spendLimitDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let spendLimit = Decimal(string: trimmedValue), spendLimit > 0 else {
-            settingsErrorMessage = "Spend limit must be a positive dollar amount"
+            settingsErrorMessage = "Daily budget must be a positive dollar amount"
             return
         }
         guard let configurationStore else {
@@ -161,6 +176,44 @@ public final class SpendDashboardViewModel {
             settingsErrorMessage = nil
             clearEndpointScopedState()
             syncSetupState(preservingCurrentError: false)
+        } catch {
+            settingsErrorMessage = "Unable to save settings"
+        }
+    }
+
+    public func saveSettings() {
+        let trimmedSpendLimit = spendLimitDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let spendLimit = Decimal(string: trimmedSpendLimit), spendLimit > 0 else {
+            settingsErrorMessage = "Daily budget must be a positive dollar amount"
+            return
+        }
+
+        let trimmedBaseURL = baseURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let baseURL = URL(string: trimmedBaseURL)?.normalizedForConfiguration else {
+            settingsErrorMessage = "Base URL must be a valid HTTP URL"
+            return
+        }
+
+        guard let configurationStore else {
+            settingsErrorMessage = "Unable to save settings"
+            return
+        }
+
+        do {
+            let currentConfiguration = try configurationStore.loadConfiguration()
+            try configurationStore.saveConfiguration(AppConfiguration(baseURL: baseURL, spendLimitUSD: spendLimit))
+
+            applySpendLimit(spendLimit)
+            spendLimitDraft = NSDecimalNumber(decimal: spendLimit).stringValue
+            baseURLDraft = baseURL.absoluteString
+            settingsErrorMessage = nil
+
+            if currentConfiguration.baseURL != baseURL {
+                clearEndpointScopedState()
+                syncSetupState(preservingCurrentError: false)
+            }
+
+            selectedPopoverMode = .overview
         } catch {
             settingsErrorMessage = "Unable to save settings"
         }
@@ -284,11 +337,27 @@ public final class SpendDashboardViewModel {
 
     private func applySpendLimit(_ spendLimit: Decimal) {
         if let currentSnapshot {
-            self.currentSnapshot = currentSnapshot.applyingLimit(spendLimit)
+            let rangeBudget = budgetLimit(for: currentSnapshot.range, dailyBudget: spendLimit)
+            self.currentSnapshot = currentSnapshot.applyingLimit(rangeBudget)
         }
         if let menuBarSnapshot {
-            self.menuBarSnapshot = menuBarSnapshot.applyingLimit(spendLimit)
+            let rangeBudget = budgetLimit(for: menuBarSnapshot.range, dailyBudget: spendLimit)
+            self.menuBarSnapshot = menuBarSnapshot.applyingLimit(rangeBudget)
         }
+    }
+
+    private func budgetLimit(
+        for range: SpendRange,
+        dailyBudget: Decimal,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Decimal {
+        let dateRange = SpendRangeResolver().dateRange(for: range, now: now, calendar: calendar)
+        let start = calendar.startOfDay(for: dateRange.startDate)
+        let end = calendar.startOfDay(for: dateRange.endDate)
+        let dayDelta = calendar.dateComponents([.day], from: start, to: end).day ?? 1
+        let dayCount = max(1, dayDelta)
+        return dailyBudget * Decimal(dayCount)
     }
 
     private func clearSpendSnapshots() {
