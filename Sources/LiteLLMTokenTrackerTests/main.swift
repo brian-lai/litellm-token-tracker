@@ -1080,6 +1080,36 @@ func testConfigurationStorePersistsBaseURL() throws {
     try expectEqual(configuration.baseURL, baseURL, "configuration store should persist base URL")
 }
 
+func testConfigurationStoreDefaultsGatewayProviderToLiteLLM() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    let store = LocalAppConfigurationStore(fileURL: fileURL, legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused"))
+
+    let configuration = try store.loadConfiguration()
+
+    try expectEqual(configuration.gatewayProvider, .litellm, "configuration should default to LiteLLM gateway provider")
+}
+
+func testConfigurationStorePersistsGatewayProvider() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    let store = LocalAppConfigurationStore(fileURL: fileURL, legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused"))
+
+    try store.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://bifrost.example.internal")!, spendLimitUSD: 80, gatewayProvider: .bifrost))
+    let configuration = try store.loadConfiguration()
+
+    try expectEqual(configuration.gatewayProvider, .bifrost, "configuration store should persist gateway provider")
+}
+
+func testConfigurationStoreFallsBackToLiteLLMForInvalidGatewayValue() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"baseURL":"https://gateway.example.internal","spendLimitUSD":"80","gatewayProvider":"unknown"}"#.utf8).write(to: fileURL)
+    let store = LocalAppConfigurationStore(fileURL: fileURL, legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused"))
+
+    let configuration = try store.loadConfiguration()
+
+    try expectEqual(configuration.gatewayProvider, .litellm, "invalid gateway provider should fall back to LiteLLM")
+}
+
 func testConfigurationStoreFallsBackOnInvalidValues() throws {
     let fileURL = temporaryConfigurationFileURL()
     try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -3627,6 +3657,9 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testDoesNotExposeKeyInErrorDescription", testDoesNotExposeKeyInErrorDescription),
     ("testConfigurationStorePersistsSpendLimit", testConfigurationStorePersistsSpendLimit),
     ("testConfigurationStorePersistsBaseURL", testConfigurationStorePersistsBaseURL),
+    ("testConfigurationStoreDefaultsGatewayProviderToLiteLLM", testConfigurationStoreDefaultsGatewayProviderToLiteLLM),
+    ("testConfigurationStorePersistsGatewayProvider", testConfigurationStorePersistsGatewayProvider),
+    ("testConfigurationStoreFallsBackToLiteLLMForInvalidGatewayValue", testConfigurationStoreFallsBackToLiteLLMForInvalidGatewayValue),
     ("testConfigurationStoreFallsBackOnInvalidValues", testConfigurationStoreFallsBackOnInvalidValues),
     ("testConfigurationStoreRejectsNonHTTPSchemes", testConfigurationStoreRejectsNonHTTPSchemes),
     ("testConfigurationStoreNormalizesSecretBearingBaseURLOnSave", testConfigurationStoreNormalizesSecretBearingBaseURLOnSave),

@@ -3,10 +3,12 @@ import Foundation
 public struct AppConfiguration: Equatable, Sendable {
     public let baseURL: URL?
     public let spendLimitUSD: Decimal
+    public let gatewayProvider: GatewayProvider
 
-    public init(baseURL: URL? = nil, spendLimitUSD: Decimal = 80) {
+    public init(baseURL: URL? = nil, spendLimitUSD: Decimal = 80, gatewayProvider: GatewayProvider = .litellm) {
         self.baseURL = baseURL
         self.spendLimitUSD = spendLimitUSD
+        self.gatewayProvider = gatewayProvider
     }
 }
 
@@ -87,7 +89,8 @@ public struct LocalAppConfigurationStore: MutableAppConfigurationStoring {
             let stored = try JSONDecoder().decode(StoredConfiguration.self, from: data)
             let configuration = AppConfiguration(
                 baseURL: stored.validBaseURL ?? defaults.baseURL,
-                spendLimitUSD: stored.validSpendLimit ?? defaults.spendLimitUSD
+                spendLimitUSD: stored.validSpendLimit ?? defaults.spendLimitUSD,
+                gatewayProvider: stored.validGatewayProvider ?? defaults.gatewayProvider
             )
             if stored.needsNormalization(comparedTo: configuration) {
                 try saveConfiguration(configuration)
@@ -107,7 +110,8 @@ public struct LocalAppConfigurationStore: MutableAppConfigurationStoring {
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
             let stored = StoredConfiguration(
                 baseURL: configuration.baseURL?.normalizedForConfiguration?.absoluteString,
-                spendLimitUSD: NSDecimalNumber(decimal: configuration.spendLimitUSD).stringValue
+                spendLimitUSD: NSDecimalNumber(decimal: configuration.spendLimitUSD).stringValue,
+                gatewayProvider: configuration.gatewayProvider.rawValue
             )
             let data = try JSONEncoder().encode(stored)
             try data.write(to: fileURL, options: .atomic)
@@ -123,7 +127,7 @@ public struct LocalAppConfigurationStore: MutableAppConfigurationStoring {
               let baseURL = URL(string: value)?.normalizedForConfiguration else {
             return nil
         }
-        return AppConfiguration(baseURL: baseURL, spendLimitUSD: defaults.spendLimitUSD)
+        return AppConfiguration(baseURL: baseURL, spendLimitUSD: defaults.spendLimitUSD, gatewayProvider: defaults.gatewayProvider)
     }
 }
 
@@ -134,6 +138,7 @@ public enum AppConfigurationStoreError: Error, Equatable {
 private struct StoredConfiguration: Codable {
     let baseURL: String?
     let spendLimitUSD: String?
+    let gatewayProvider: String?
 
     var validBaseURL: URL? {
         guard let baseURL, let url = URL(string: baseURL), let normalizedURL = url.normalizedForConfiguration else {
@@ -149,8 +154,17 @@ private struct StoredConfiguration: Codable {
         return value
     }
 
+    var validGatewayProvider: GatewayProvider? {
+        guard let gatewayProvider else {
+            return nil
+        }
+        return GatewayProvider(rawValue: gatewayProvider)
+    }
+
     func needsNormalization(comparedTo configuration: AppConfiguration) -> Bool {
-        baseURL != configuration.baseURL?.absoluteString || spendLimitUSD != NSDecimalNumber(decimal: configuration.spendLimitUSD).stringValue
+        baseURL != configuration.baseURL?.absoluteString ||
+            spendLimitUSD != NSDecimalNumber(decimal: configuration.spendLimitUSD).stringValue ||
+            gatewayProvider != configuration.gatewayProvider.rawValue
     }
 }
 
