@@ -39,7 +39,7 @@ public extension KeyContextServicing {
 public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
     private let apiKeyStore: APIKeyStoring
     private let configurationStore: AppConfigurationStoring
-    private let clientFactory: @Sendable (URL, String) -> LiteLLMClientProtocol
+    private let clientFactory: @Sendable (GatewayProvider, URL, String) -> GatewayClientProtocol
     private let cacheTTL: TimeInterval
     private let lock = NSLock()
     private var cachedSnapshot: KeyContextSnapshot?
@@ -54,7 +54,19 @@ public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
     ) {
         self.apiKeyStore = apiKeyStore
         self.configurationStore = configurationStore
-        self.clientFactory = clientFactory
+        self.clientFactory = { _, baseURL, apiKey in clientFactory(baseURL, apiKey) }
+        self.cacheTTL = cacheTTL
+    }
+
+    public init(
+        apiKeyStore: APIKeyStoring,
+        configurationStore: AppConfigurationStoring = StaticAppConfigurationStore(),
+        gatewayClientFactory: @escaping @Sendable (GatewayProvider, URL, String) -> GatewayClientProtocol,
+        cacheTTL: TimeInterval = 300
+    ) {
+        self.apiKeyStore = apiKeyStore
+        self.configurationStore = configurationStore
+        self.clientFactory = gatewayClientFactory
         self.cacheTTL = cacheTTL
     }
 
@@ -66,19 +78,23 @@ public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
             guard let baseURL = configuration.baseURL else {
                 return .failed(message: "LiteLLM base URL is missing")
             }
-            let scope = cacheScope(baseURL: baseURL, apiKey: apiKey)
+            let scope = cacheScope(baseURL: baseURL, apiKey: apiKey, gatewayProvider: configuration.gatewayProvider)
             currentScope = scope
             if !bypassingCache, let cached = loadFreshCache(now: now, scope: scope) {
                 return .refreshed(cached)
             }
-            let client = clientFactory(baseURL, apiKey)
+            let client = clientFactory(configuration.gatewayProvider, baseURL, apiKey)
             let user = try await resolvedUserContext(userContext, client: client, scope: scope)
-            let currentKey = try await client.fetchCurrentKey()
-            let ownedKeys = try await client.fetchUserKeys(userID: user.userID)
+            let currentKey = try await client.fetchCurrentKeyContext(userContext: user)
+            let ownedKeys = try await client.fetchOwnedKeyContexts(userContext: user)
             let snapshot = KeyContextSnapshot(currentKey: currentKey, ownedKeys: ownedKeys, refreshedAt: now, isStale: false)
-            save(snapshot: snapshot, userContext: user, scope: scope)
+            if let liteLLMUserContext = user.liteLLMUserContext {
+                save(snapshot: snapshot, userContext: liteLLMUserContext, scope: scope)
+            } else {
+                save(snapshot: snapshot, userContext: nil, scope: scope)
+            }
             return .refreshed(snapshot)
-        } catch LiteLLMClientError.unauthorized {
+        } catch LiteLLMClientError.unauthorized, GatewayClientError.unauthorized {
             clearCache()
             return .authFailed(message: "LiteLLM key context was rejected")
         } catch {
@@ -97,14 +113,14 @@ public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
         cachedScope = nil
     }
 
-    private func resolvedUserContext(_ userContext: LiteLLMUserContext?, client: LiteLLMClientProtocol, scope: String) async throws -> LiteLLMUserContext {
+    private func resolvedUserContext(_ userContext: LiteLLMUserContext?, client: GatewayClientProtocol, scope: String) async throws -> GatewayUserContext {
         if let userContext {
-            return userContext
+            return GatewayUserContext(liteLLMUserContext: userContext)
         }
         if let cached = loadCachedUserContext(scope: scope) {
-            return cached
+            return GatewayUserContext(liteLLMUserContext: cached)
         }
-        return try await client.fetchCurrentUser()
+        return try await client.fetchCurrentUserContext()
     }
 
     private func loadFreshCache(now: Date, scope: String) -> KeyContextSnapshot? {
@@ -134,7 +150,7 @@ public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
         return cachedUserContext
     }
 
-    private func save(snapshot: KeyContextSnapshot, userContext: LiteLLMUserContext, scope: String) {
+    private func save(snapshot: KeyContextSnapshot, userContext: LiteLLMUserContext?, scope: String) {
         lock.lock()
         defer { lock.unlock() }
         cachedSnapshot = snapshot
@@ -142,7 +158,7 @@ public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
         cachedScope = scope
     }
 
-    private func cacheScope(baseURL: URL, apiKey: String) -> String {
-        "\(baseURL.absoluteString)|\(apiKey.hashValue)"
+    private func cacheScope(baseURL: URL, apiKey: String, gatewayProvider: GatewayProvider) -> String {
+        "\(gatewayProvider.rawValue)|\(baseURL.absoluteString)|\(apiKey.hashValue)"
     }
 }

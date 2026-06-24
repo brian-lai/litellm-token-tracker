@@ -3,7 +3,7 @@ import Foundation
 public struct SpendService: SpendServicing {
     private let apiKeyStore: APIKeyStoring
     private let configurationStore: AppConfigurationStoring
-    private let clientFactory: @Sendable (URL, String) -> LiteLLMClientProtocol
+    private let clientFactory: @Sendable (GatewayProvider, URL, String) -> GatewayClientProtocol
     private let rangeResolver: DateRangeResolving
     private let cache: SpendSnapshotCaching
 
@@ -16,7 +16,21 @@ public struct SpendService: SpendServicing {
     ) {
         self.apiKeyStore = apiKeyStore
         self.configurationStore = configurationStore
-        self.clientFactory = clientFactory
+        self.clientFactory = { _, baseURL, apiKey in clientFactory(baseURL, apiKey) }
+        self.rangeResolver = rangeResolver
+        self.cache = cache
+    }
+
+    public init(
+        apiKeyStore: APIKeyStoring,
+        configurationStore: AppConfigurationStoring = StaticAppConfigurationStore(),
+        gatewayClientFactory: @escaping @Sendable (GatewayProvider, URL, String) -> GatewayClientProtocol,
+        rangeResolver: DateRangeResolving = SpendRangeResolver(),
+        cache: SpendSnapshotCaching = InMemorySpendSnapshotCache()
+    ) {
+        self.apiKeyStore = apiKeyStore
+        self.configurationStore = configurationStore
+        self.clientFactory = gatewayClientFactory
         self.rangeResolver = rangeResolver
         self.cache = cache
     }
@@ -29,10 +43,13 @@ public struct SpendService: SpendServicing {
             guard let baseURL = configuration.baseURL else {
                 return .setupRequired(message: "LiteLLM base URL is missing")
             }
-            let scope = cacheScope(baseURL: baseURL, apiKey: apiKey)
+            let scope = cacheScope(baseURL: baseURL, apiKey: apiKey, gatewayProvider: configuration.gatewayProvider)
             currentScope = scope
-            let client = clientFactory(baseURL, apiKey)
-            let user = try await client.fetchCurrentUser()
+            let client = clientFactory(configuration.gatewayProvider, baseURL, apiKey)
+            let gatewayUser = try await client.fetchCurrentUserContext()
+            guard let user = gatewayUser.liteLLMUserContext else {
+                throw GatewayClientError.malformedResponse
+            }
             let dateRange = rangeResolver.dateRange(for: range, now: now, calendar: calendar)
             let rangeBudgetUSD = budgetForRange(
                 dailyBudgetUSD: configuration.spendLimitUSD,
@@ -41,7 +58,7 @@ public struct SpendService: SpendServicing {
             )
             let snapshot: SpendSnapshot
             do {
-                let analytics = try await client.fetchUserDailyActivity(range: dateRange, userID: user.userID)
+                let analytics = try await client.fetchSpendAnalytics(range: dateRange, userContext: gatewayUser)
                 snapshot = SpendAggregator.snapshot(
                     analytics: analytics,
                     range: range,
@@ -50,7 +67,7 @@ public struct SpendService: SpendServicing {
                     userContext: user
                 )
             } catch {
-                let rows = try await client.fetchSpendRows(range: dateRange, userID: user.userID)
+                let rows = try await client.fetchSpendRows(range: dateRange, userContext: gatewayUser)
                 let fallbackSnapshot = SpendAggregator.snapshot(
                     rows: rows,
                     range: range,
@@ -83,7 +100,7 @@ public struct SpendService: SpendServicing {
             return .refreshed(snapshot)
         } catch APIKeyStoreError.missingKey {
             return .setupRequired(message: "LiteLLM API key is missing")
-        } catch LiteLLMClientError.unauthorized {
+        } catch LiteLLMClientError.unauthorized, GatewayClientError.unauthorized {
             return .authFailed(message: "LiteLLM API key was rejected")
         } catch {
             if let currentScope, let stale = try? cache.loadSnapshot(for: range, scope: currentScope) {
@@ -97,8 +114,8 @@ public struct SpendService: SpendServicing {
         cache.clearSnapshots()
     }
 
-    private func cacheScope(baseURL: URL, apiKey: String) -> String {
-        "\(baseURL.absoluteString)|\(apiKey.hashValue)"
+    private func cacheScope(baseURL: URL, apiKey: String, gatewayProvider: GatewayProvider) -> String {
+        "\(gatewayProvider.rawValue)|\(baseURL.absoluteString)|\(apiKey.hashValue)"
     }
 
     private func budgetForRange(dailyBudgetUSD: Decimal, dateRange: DateRange, calendar: Calendar) -> Decimal {

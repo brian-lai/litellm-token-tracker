@@ -191,6 +191,10 @@ final class FakeMenuBarPreferenceStore: MenuBarPreferenceStoring, @unchecked Sen
     }
 }
 
+final class ProviderRecorder: @unchecked Sendable {
+    var provider: GatewayProvider?
+}
+
 struct FakeClient: LiteLLMClientProtocol {
     var userResult: Result<LiteLLMUserContext, Error>
     var activityResult: Result<SpendAnalyticsSummary, Error>?
@@ -1476,6 +1480,25 @@ func testSpendServiceStaleCacheIsScopedByBaseURL() async throws {
     guard case .failed = result else {
         throw TestFailure(description: "spend service should not return another base URL's stale spend")
     }
+}
+
+func testSpendServicePassesConfiguredGatewayProviderToFactory() async throws {
+    let recorder = ProviderRecorder()
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://bifrost.example.internal")!, spendLimitUSD: 80, gatewayProvider: .bifrost)),
+        gatewayClientFactory: { provider, _, _ in
+            recorder.provider = provider
+            return FakeClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+                rowsResult: .success([SpendLogSummaryRow(date: try! fixedDate("2026-05-18"), spendUSD: 10)])
+            )
+        }
+    )
+
+    _ = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(recorder.provider, .bifrost, "spend service should pass configured gateway provider into the client factory")
 }
 
 func testAuthFailureReturnsAuthFailedWithoutRetrying() async throws {
@@ -3266,6 +3289,26 @@ func testKeyEndpointsMapUnauthorizedWithoutBreakingSpend() async throws {
     }
 }
 
+func testKeyContextServicePassesConfiguredGatewayProviderToFactory() async throws {
+    let recorder = ProviderRecorder()
+    let service = KeyContextService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://bifrost.example.internal")!, spendLimitUSD: 80, gatewayProvider: .bifrost)),
+        gatewayClientFactory: { provider, _, _ in
+            recorder.provider = provider
+            return RecordingKeyClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+                currentKeyResult: .success(keySummary(alias: "Current", spend: 1)),
+                userKeysResult: .success([])
+            )
+        }
+    )
+
+    _ = await service.refresh(userContext: nil, now: try fixedDate("2026-05-18"))
+
+    try expectEqual(recorder.provider, .bifrost, "key context service should pass configured gateway provider into the client factory")
+}
+
 func testKeyContextUsesStaleValueWhenAvailable() async throws {
     let stale = KeyContextSnapshot(currentKey: keySummary(alias: "Old", spend: 1), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
     let client = RecordingKeyClient(
@@ -3866,6 +3909,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testReleaseUpdateCheckerDetectsNewerRelease", testReleaseUpdateCheckerDetectsNewerRelease),
     ("testReleaseUpdateCheckerIgnoresSameVersion", testReleaseUpdateCheckerIgnoresSameVersion),
     ("testKeyEndpointsMapUnauthorizedWithoutBreakingSpend", testKeyEndpointsMapUnauthorizedWithoutBreakingSpend),
+    ("testKeyContextServicePassesConfiguredGatewayProviderToFactory", testKeyContextServicePassesConfiguredGatewayProviderToFactory),
     ("testKeyContextUsesStaleValueWhenAvailable", testKeyContextUsesStaleValueWhenAvailable),
     ("testKeyContextCacheExpiresAfterFiveMinutes", testKeyContextCacheExpiresAfterFiveMinutes),
     ("testManualKeyContextRefreshBypassesFreshCache", testManualKeyContextRefreshBypassesFreshCache),
@@ -3883,6 +3927,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testReturnsStaleSnapshotOnTransientAPIFailure", testReturnsStaleSnapshotOnTransientAPIFailure),
     ("testSpendServiceStaleCacheIsScopedByCredential", testSpendServiceStaleCacheIsScopedByCredential),
     ("testSpendServiceStaleCacheIsScopedByBaseURL", testSpendServiceStaleCacheIsScopedByBaseURL),
+    ("testSpendServicePassesConfiguredGatewayProviderToFactory", testSpendServicePassesConfiguredGatewayProviderToFactory),
     ("testAuthFailureReturnsAuthFailedWithoutRetrying", testAuthFailureReturnsAuthFailedWithoutRetrying),
     ("testMissingKeyReturnsSetupRequired", testMissingKeyReturnsSetupRequired),
     ("testMissingBaseURLReturnsSetupRequired", testMissingBaseURLReturnsSetupRequired),

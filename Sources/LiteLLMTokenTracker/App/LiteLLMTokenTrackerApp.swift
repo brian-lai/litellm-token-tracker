@@ -47,15 +47,25 @@ final class LiteLLMTokenTrackerAppDelegate: NSObject, NSApplicationDelegate {
             spendService: SpendService(
                 apiKeyStore: apiKeyStore,
                 configurationStore: configurationStore,
-                clientFactory: { baseURL, apiKey in
-                    LiteLLMClient(baseURL: baseURL, apiKey: apiKey)
+                gatewayClientFactory: { provider, baseURL, apiKey in
+                    switch provider {
+                    case .litellm:
+                        LiteLLMClient(baseURL: baseURL, apiKey: apiKey)
+                    case .bifrost:
+                        BifrostClient(baseURL: baseURL, apiKey: apiKey)
+                    }
                 }
             ),
             keyContextService: KeyContextService(
                 apiKeyStore: apiKeyStore,
                 configurationStore: configurationStore,
-                clientFactory: { baseURL, apiKey in
-                    LiteLLMClient(baseURL: baseURL, apiKey: apiKey)
+                gatewayClientFactory: { provider, baseURL, apiKey in
+                    switch provider {
+                    case .litellm:
+                        LiteLLMClient(baseURL: baseURL, apiKey: apiKey)
+                    case .bifrost:
+                        BifrostClient(baseURL: baseURL, apiKey: apiKey)
+                    }
                 }
             ),
             apiKeyStore: apiKeyStore,
