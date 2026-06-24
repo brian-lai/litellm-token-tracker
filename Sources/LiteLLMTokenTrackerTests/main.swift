@@ -1764,6 +1764,62 @@ func testInvalidSettingsSaveKeepsSettingsMode() async throws {
     try expectEqual(viewModel.settingsErrorMessage, "Daily budget must be a positive dollar amount", "failed settings save should expose validation error")
 }
 
+@MainActor
+func testSettingsModeShowsGatewaySelector() async throws {
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80))
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), configurationStore: configurationStore)
+
+    await viewModel.openSettings()
+
+    try expectEqual(viewModel.gatewayProviderOptions, [.litellm, .bifrost], "settings mode should expose supported gateway providers")
+    try expectEqual(viewModel.gatewayProviderDraft, .litellm, "settings mode should draft the persisted gateway provider")
+}
+
+@MainActor
+func testChangingGatewayDraftDoesNotApplyUntilSave() async throws {
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80, gatewayProvider: .litellm))
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), configurationStore: configurationStore)
+
+    viewModel.gatewayProviderDraft = .bifrost
+
+    try expectEqual(try configurationStore.loadConfiguration().gatewayProvider, .litellm, "gateway draft changes should not persist before Save")
+}
+
+@MainActor
+func testSavingGatewayClearsEndpointScopedStateAndRequiresRefresh() async throws {
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80, gatewayProvider: .litellm))
+    let keyContext = KeyContextSnapshot(currentKey: keySummary(alias: "old", spend: 1), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), keyContextService: RecordingKeyContextService(results: []), configurationStore: configurationStore)
+    await viewModel.openSettings()
+    viewModel.currentSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.menuBarSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.currentAnalyticsSummary = analyticsSummary(totalSpendUSD: 40, dailyPoints: [], source: .userDailyActivity)
+    viewModel.keyContextSnapshot = keyContext
+    viewModel.gatewayProviderDraft = .bifrost
+    viewModel.baseURLDraft = "https://litellm.example.internal"
+    viewModel.spendLimitDraft = "80"
+
+    viewModel.saveSettings()
+
+    try expectEqual(try configurationStore.loadConfiguration().gatewayProvider, .bifrost, "settings save should persist selected gateway provider")
+    try expectEqual(viewModel.currentSnapshot, nil, "gateway changes should clear current spend from the old provider")
+    try expectEqual(viewModel.menuBarSnapshot, nil, "gateway changes should clear menu bar spend from the old provider")
+    try expectEqual(viewModel.currentAnalyticsSummary, nil, "gateway changes should clear analytics from the old provider")
+    try expectEqual(viewModel.keyContextSnapshot, nil, "gateway changes should clear key context from the old provider")
+}
+
 func testSpendServiceScalesBudgetBySelectedRange() async throws {
     let service = SpendService(
         apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
@@ -3834,6 +3890,9 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testInvalidBaseURLShowsSettingsError", testInvalidBaseURLShowsSettingsError),
     ("testSaveSettingsPersistsBothFieldsAndExitsSettingsMode", testSaveSettingsPersistsBothFieldsAndExitsSettingsMode),
     ("testInvalidSettingsSaveKeepsSettingsMode", testInvalidSettingsSaveKeepsSettingsMode),
+    ("testSettingsModeShowsGatewaySelector", testSettingsModeShowsGatewaySelector),
+    ("testChangingGatewayDraftDoesNotApplyUntilSave", testChangingGatewayDraftDoesNotApplyUntilSave),
+    ("testSavingGatewayClearsEndpointScopedStateAndRequiresRefresh", testSavingGatewayClearsEndpointScopedStateAndRequiresRefresh),
     ("testChangingBaseURLClearsSpendSnapshots", testChangingBaseURLClearsSpendSnapshots),
     ("testChangingBaseURLPreservesSetupPauseState", testChangingBaseURLPreservesSetupPauseState),
     ("testAPIKeyChangeClearsSpendSnapshots", testAPIKeyChangeClearsSpendSnapshots),

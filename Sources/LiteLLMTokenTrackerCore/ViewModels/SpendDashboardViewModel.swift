@@ -29,6 +29,7 @@ public final class SpendDashboardViewModel {
     public var apiKeyDraft = ""
     public var spendLimitDraft = ""
     public var baseURLDraft = ""
+    public var gatewayProviderDraft: GatewayProvider = .litellm
     public var settingsErrorMessage: String?
     public var menuBarMetric: MenuBarMetric
     public var availableUpdateURL: URL?
@@ -46,6 +47,10 @@ public final class SpendDashboardViewModel {
             return trimmed
         }
         return "v\(trimmed)"
+    }
+
+    public var gatewayProviderOptions: [GatewayProvider] {
+        GatewayProvider.allCases
     }
 
     public var menuBarPresentation: MenuBarSpendPresentation {
@@ -76,6 +81,7 @@ public final class SpendDashboardViewModel {
         let configuration = (try? configurationStore?.loadConfiguration()) ?? AppConfiguration()
         self.spendLimitDraft = NSDecimalNumber(decimal: configuration.spendLimitUSD).stringValue
         self.baseURLDraft = configuration.baseURL?.absoluteString ?? ""
+        self.gatewayProviderDraft = configuration.gatewayProvider
         syncSetupState(preservingCurrentError: false)
     }
 
@@ -160,7 +166,7 @@ public final class SpendDashboardViewModel {
 
         do {
             let currentConfiguration = try configurationStore.loadConfiguration()
-            try configurationStore.saveConfiguration(AppConfiguration(baseURL: currentConfiguration.baseURL, spendLimitUSD: spendLimit))
+            try configurationStore.saveConfiguration(AppConfiguration(baseURL: currentConfiguration.baseURL, spendLimitUSD: spendLimit, gatewayProvider: currentConfiguration.gatewayProvider))
             applySpendLimit(spendLimit)
             spendLimitDraft = NSDecimalNumber(decimal: spendLimit).stringValue
             settingsErrorMessage = nil
@@ -182,7 +188,7 @@ public final class SpendDashboardViewModel {
 
         do {
             let currentConfiguration = try configurationStore.loadConfiguration()
-            try configurationStore.saveConfiguration(AppConfiguration(baseURL: baseURL, spendLimitUSD: currentConfiguration.spendLimitUSD))
+            try configurationStore.saveConfiguration(AppConfiguration(baseURL: baseURL, spendLimitUSD: currentConfiguration.spendLimitUSD, gatewayProvider: currentConfiguration.gatewayProvider))
             baseURLDraft = baseURL.absoluteString
             settingsErrorMessage = nil
             clearEndpointScopedState()
@@ -212,14 +218,14 @@ public final class SpendDashboardViewModel {
 
         do {
             let currentConfiguration = try configurationStore.loadConfiguration()
-            try configurationStore.saveConfiguration(AppConfiguration(baseURL: baseURL, spendLimitUSD: spendLimit))
+            try configurationStore.saveConfiguration(AppConfiguration(baseURL: baseURL, spendLimitUSD: spendLimit, gatewayProvider: gatewayProviderDraft))
 
             applySpendLimit(spendLimit)
             spendLimitDraft = NSDecimalNumber(decimal: spendLimit).stringValue
             baseURLDraft = baseURL.absoluteString
             settingsErrorMessage = nil
 
-            if currentConfiguration.baseURL != baseURL {
+            if currentConfiguration.baseURL != baseURL || currentConfiguration.gatewayProvider != gatewayProviderDraft {
                 clearEndpointScopedState()
                 syncSetupState(preservingCurrentError: false)
             }
