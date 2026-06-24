@@ -928,6 +928,56 @@ func testLiteLLMGatewayAdapterMapsKeyContextEndpoints() async throws {
     try expectEqual(try await client.fetchOwnedKeyContexts(userContext: userContext), [ownedKey], "LiteLLM gateway adapter should forward owned key requests")
 }
 
+func testBifrostDashboardDecodesTotalsAndDailyCostBuckets() throws {
+    let analytics = try BifrostResponseDecoder.decodeDashboard(from: fixtureData("bifrost-dashboard.json"), calendar: fixedCalendar())
+
+    try expectEqual(analytics.totalSpendUSD, Decimal(string: "12.75")!, "dashboard stats should expose total spend")
+    try expectEqual(analytics.dailyPoints.count, 2, "dashboard cost buckets should map to daily activity points")
+    try expectEqual(analytics.dailyPoints[0].date, try fixedDate("2026-05-18"), "first cost bucket date should decode from RFC3339 timestamp")
+    try expectEqual(analytics.dailyPoints[0].spendUSD, Decimal(string: "7.25")!, "first cost bucket should preserve spend")
+    try expectEqual(analytics.dailyPoints[1].spendUSD, Decimal(string: "5.5")!, "second cost bucket should preserve spend")
+    try expectEqual(analytics.source, .userDailyActivity, "dashboard data should be treated as the primary analytics source")
+}
+
+func testBifrostDashboardDecodesTokenUsageTotals() throws {
+    let analytics = try BifrostResponseDecoder.decodeDashboard(from: fixtureData("bifrost-dashboard.json"), calendar: fixedCalendar())
+
+    try expectEqual(analytics.totals.totalTokens, 3750, "dashboard stats should expose total tokens")
+    try expectEqual(analytics.totals.apiRequests, 9, "dashboard stats should expose total request count")
+    try expectEqual(analytics.totals.successfulRequests, 8, "dashboard stats should expose successful request count")
+    try expectEqual(analytics.totals.failedRequests, 1, "dashboard stats should expose failed request count")
+    try expectEqual(analytics.dailyPoints[0].totals.promptTokens, 1000, "token buckets should map prompt tokens onto matching days")
+    try expectEqual(analytics.dailyPoints[0].totals.completionTokens, 500, "token buckets should map completion tokens onto matching days")
+    try expectEqual(analytics.dailyPoints[0].totals.totalTokens, 1500, "token buckets should map total tokens onto matching days")
+    try expectEqual(analytics.dailyPoints[0].totals.apiRequests, 4, "request buckets should map request counts onto matching days")
+}
+
+func testBifrostDashboardSkipsMalformedBucketsWithoutDroppingTotals() throws {
+    let payload = """
+    {
+      "overview": {
+        "stats": {
+          "total_cost": 19.5,
+          "total_tokens": 200,
+          "total_requests": 2
+        },
+        "cost": {
+          "buckets": [
+            { "timestamp": "2026-05-18T00:00:00Z", "total_cost": 7.5 },
+            { "timestamp": "2026-05-19T00:00:00Z" }
+          ]
+        }
+      }
+    }
+    """
+
+    let analytics = try BifrostResponseDecoder.decodeDashboard(from: Data(payload.utf8), calendar: fixedCalendar())
+
+    try expectEqual(analytics.totalSpendUSD, Decimal(string: "19.5")!, "malformed buckets should not drop dashboard totals")
+    try expectEqual(analytics.dailyPoints.count, 1, "cost buckets missing spend should be skipped")
+    try expectEqual(analytics.dailyPoints[0].spendUSD, Decimal(string: "7.5")!, "valid bucket should still decode")
+}
+
 func testReleaseUpdateCheckerDetectsNewerRelease() async throws {
     let payload = """
     {
@@ -3903,7 +3953,10 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testRefreshMenuActionIsDisabledWhileRefreshIsRunning", testRefreshMenuActionIsDisabledWhileRefreshIsRunning),
     ("testHandlePrimaryClickUsesPopoverTogglePath", testHandlePrimaryClickUsesPopoverTogglePath),
     ("testHandleSecondaryClickUsesContextMenuPath", testHandleSecondaryClickUsesContextMenuPath),
-    ("testHandleSecondaryClickDisablesRefreshInBuiltMenuWhileRefreshIsRunning", testHandleSecondaryClickDisablesRefreshInBuiltMenuWhileRefreshIsRunning)
+    ("testHandleSecondaryClickDisablesRefreshInBuiltMenuWhileRefreshIsRunning", testHandleSecondaryClickDisablesRefreshInBuiltMenuWhileRefreshIsRunning),
+    ("testBifrostDashboardDecodesTotalsAndDailyCostBuckets", testBifrostDashboardDecodesTotalsAndDailyCostBuckets),
+    ("testBifrostDashboardDecodesTokenUsageTotals", testBifrostDashboardDecodesTokenUsageTotals),
+    ("testBifrostDashboardSkipsMalformedBucketsWithoutDroppingTotals", testBifrostDashboardSkipsMalformedBucketsWithoutDroppingTotals)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [
