@@ -850,6 +850,21 @@ func testRedactsAuthorizationHeaderFromLogs() async throws {
     try expect(!String(describing: logger.events).contains("Bearer"), "logs should not contain authorization header values")
 }
 
+func testGatewayLogsIncludeProviderEndpointAndCorrelationIDWithoutSecrets() async throws {
+    let logger = CapturingLogger()
+    let loader = StubURLLoader(data: try fixtureData("user-info.json"))
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.example.internal")!, apiKey: "secret-token", loader: loader, logger: logger)
+
+    _ = try await client.fetchCurrentUser()
+
+    let event = try logger.events.first.unwrap("gateway log event")
+    try expectEqual(event.gatewayProvider, .litellm, "gateway logs should include provider")
+    try expectEqual(event.endpoint, "/user/info", "gateway logs should include endpoint")
+    try expect(!event.correlationID.isEmpty, "gateway logs should include a correlation id")
+    try expect(!String(describing: logger.events).contains("secret-token"), "gateway logs should not contain API keys")
+    try expect(!String(describing: logger.events).contains("Bearer"), "gateway logs should not contain authorization headers")
+}
+
 func testFetchSpendRowsDoesNotComputeSnapshot() async throws {
     let loader = StubURLLoader(data: try fixtureData("spend-logs-summary.json"))
     let client = LiteLLMClient(baseURL: URL(string: "https://litellm.example.internal")!, apiKey: "secret-token", loader: loader)
@@ -3901,6 +3916,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testMapsUnauthorized", testMapsUnauthorized),
     ("testMapsFullyInvalidJSONToMalformedResponse", testMapsFullyInvalidJSONToMalformedResponse),
     ("testRedactsAuthorizationHeaderFromLogs", testRedactsAuthorizationHeaderFromLogs),
+    ("testGatewayLogsIncludeProviderEndpointAndCorrelationIDWithoutSecrets", testGatewayLogsIncludeProviderEndpointAndCorrelationIDWithoutSecrets),
     ("testFetchSpendRowsDoesNotComputeSnapshot", testFetchSpendRowsDoesNotComputeSnapshot),
     ("testFetchUserDailyActivityDoesNotLogPayloads", testFetchUserDailyActivityDoesNotLogPayloads),
     ("testLiteLLMGatewayAdapterMapsUserContext", testLiteLLMGatewayAdapterMapsUserContext),

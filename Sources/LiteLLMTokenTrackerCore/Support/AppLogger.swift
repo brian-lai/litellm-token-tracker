@@ -2,6 +2,7 @@ import Foundation
 
 public struct AppLogEvent: Equatable, Sendable {
     public let correlationID: String
+    public let gatewayProvider: GatewayProvider?
     public let endpoint: String
     public let statusCode: Int?
     public let durationMilliseconds: Int?
@@ -11,6 +12,7 @@ public struct AppLogEvent: Equatable, Sendable {
 
     public init(
         correlationID: String,
+        gatewayProvider: GatewayProvider? = nil,
         endpoint: String,
         statusCode: Int? = nil,
         durationMilliseconds: Int? = nil,
@@ -19,6 +21,7 @@ public struct AppLogEvent: Equatable, Sendable {
         message: String? = nil
     ) {
         self.correlationID = correlationID
+        self.gatewayProvider = gatewayProvider
         self.endpoint = endpoint
         self.statusCode = statusCode
         self.durationMilliseconds = durationMilliseconds

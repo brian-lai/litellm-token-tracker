@@ -72,7 +72,7 @@ public struct LiteLLMClient: LiteLLMClientProtocol {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = range.timeZone
         let result = try LiteLLMResponseDecoder.decodeSpendRows(from: data, calendar: calendar)
-        logger.log(AppLogEvent(correlationID: correlationID(), endpoint: "/spend/logs", rowCount: result.rows.count, skippedRowCount: result.skippedRowCount))
+        logger.log(AppLogEvent(correlationID: correlationID(), gatewayProvider: .litellm, endpoint: "/spend/logs", rowCount: result.rows.count, skippedRowCount: result.skippedRowCount))
         return result.rows
     }
 
@@ -82,7 +82,7 @@ public struct LiteLLMClient: LiteLLMClientProtocol {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = range.timeZone
         let result = try LiteLLMResponseDecoder.decodeUserDailyActivity(from: data, calendar: calendar)
-        logger.log(AppLogEvent(correlationID: correlationID(), endpoint: "/user/daily/activity", rowCount: result.summary.dailyPoints.count, skippedRowCount: result.skippedRowCount))
+        logger.log(AppLogEvent(correlationID: correlationID(), gatewayProvider: .litellm, endpoint: "/user/daily/activity", rowCount: result.summary.dailyPoints.count, skippedRowCount: result.skippedRowCount))
         return result.analytics
     }
 
@@ -160,6 +160,7 @@ public struct LiteLLMClient: LiteLLMClientProtocol {
             let result = try await loader.data(for: request)
             logger.log(AppLogEvent(
                 correlationID: correlationID,
+                gatewayProvider: .litellm,
                 endpoint: endpoint,
                 statusCode: result.1.statusCode,
                 durationMilliseconds: Int(Date().timeIntervalSince(started) * 1000)
