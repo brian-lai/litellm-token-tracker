@@ -7,12 +7,44 @@ public enum LiteLLMClientError: Error, Equatable {
     case malformedResponse
 }
 
-public protocol LiteLLMClientProtocol: Sendable {
+public protocol LiteLLMClientProtocol: GatewayClientProtocol {
     func fetchCurrentUser() async throws -> LiteLLMUserContext
     func fetchUserDailyActivity(range: DateRange, userID: String) async throws -> SpendAnalyticsSummary
     func fetchSpendRows(range: DateRange, userID: String) async throws -> [SpendLogSummaryRow]
     func fetchCurrentKey() async throws -> KeySpendSummary
     func fetchUserKeys(userID: String) async throws -> [KeySpendSummary]
+}
+
+public extension LiteLLMClientProtocol {
+    func fetchCurrentUserContext() async throws -> GatewayUserContext {
+        try await GatewayUserContext(liteLLMUserContext: fetchCurrentUser())
+    }
+
+    func fetchSpendAnalytics(range: DateRange, userContext: GatewayUserContext?) async throws -> SpendAnalyticsSummary {
+        let userID = try liteLLMUserID(from: userContext)
+        return try await fetchUserDailyActivity(range: range, userID: userID)
+    }
+
+    func fetchSpendRows(range: DateRange, userContext: GatewayUserContext?) async throws -> [SpendLogSummaryRow] {
+        let userID = try liteLLMUserID(from: userContext)
+        return try await fetchSpendRows(range: range, userID: userID)
+    }
+
+    func fetchCurrentKeyContext(userContext: GatewayUserContext?) async throws -> KeySpendSummary {
+        try await fetchCurrentKey()
+    }
+
+    func fetchOwnedKeyContexts(userContext: GatewayUserContext?) async throws -> [KeySpendSummary] {
+        let userID = try liteLLMUserID(from: userContext)
+        return try await fetchUserKeys(userID: userID)
+    }
+
+    private func liteLLMUserID(from userContext: GatewayUserContext?) throws -> String {
+        guard let userID = userContext?.userID, !userID.isEmpty else {
+            throw LiteLLMClientError.malformedResponse
+        }
+        return userID
+    }
 }
 
 public struct LiteLLMClient: LiteLLMClientProtocol {
@@ -40,7 +72,7 @@ public struct LiteLLMClient: LiteLLMClientProtocol {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = range.timeZone
         let result = try LiteLLMResponseDecoder.decodeSpendRows(from: data, calendar: calendar)
-        logger.log(AppLogEvent(correlationID: correlationID(), endpoint: "/spend/logs", rowCount: result.rows.count, skippedRowCount: result.skippedRowCount))
+        logger.log(AppLogEvent(correlationID: correlationID(), gatewayProvider: .litellm, endpoint: "/spend/logs", rowCount: result.rows.count, skippedRowCount: result.skippedRowCount))
         return result.rows
     }
 
@@ -50,7 +82,7 @@ public struct LiteLLMClient: LiteLLMClientProtocol {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = range.timeZone
         let result = try LiteLLMResponseDecoder.decodeUserDailyActivity(from: data, calendar: calendar)
-        logger.log(AppLogEvent(correlationID: correlationID(), endpoint: "/user/daily/activity", rowCount: result.summary.dailyPoints.count, skippedRowCount: result.skippedRowCount))
+        logger.log(AppLogEvent(correlationID: correlationID(), gatewayProvider: .litellm, endpoint: "/user/daily/activity", rowCount: result.summary.dailyPoints.count, skippedRowCount: result.skippedRowCount))
         return result.analytics
     }
 
@@ -128,6 +160,7 @@ public struct LiteLLMClient: LiteLLMClientProtocol {
             let result = try await loader.data(for: request)
             logger.log(AppLogEvent(
                 correlationID: correlationID,
+                gatewayProvider: .litellm,
                 endpoint: endpoint,
                 statusCode: result.1.statusCode,
                 durationMilliseconds: Int(Date().timeIntervalSince(started) * 1000)

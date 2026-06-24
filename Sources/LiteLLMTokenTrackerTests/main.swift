@@ -191,6 +191,10 @@ final class FakeMenuBarPreferenceStore: MenuBarPreferenceStoring, @unchecked Sen
     }
 }
 
+final class ProviderRecorder: @unchecked Sendable {
+    var provider: GatewayProvider?
+}
+
 struct FakeClient: LiteLLMClientProtocol {
     var userResult: Result<LiteLLMUserContext, Error>
     var activityResult: Result<SpendAnalyticsSummary, Error>?
@@ -846,6 +850,21 @@ func testRedactsAuthorizationHeaderFromLogs() async throws {
     try expect(!String(describing: logger.events).contains("Bearer"), "logs should not contain authorization header values")
 }
 
+func testGatewayLogsIncludeProviderEndpointAndCorrelationIDWithoutSecrets() async throws {
+    let logger = CapturingLogger()
+    let loader = StubURLLoader(data: try fixtureData("user-info.json"))
+    let client = LiteLLMClient(baseURL: URL(string: "https://litellm.example.internal")!, apiKey: "secret-token", loader: loader, logger: logger)
+
+    _ = try await client.fetchCurrentUser()
+
+    let event = try logger.events.first.unwrap("gateway log event")
+    try expectEqual(event.gatewayProvider, .litellm, "gateway logs should include provider")
+    try expectEqual(event.endpoint, "/user/info", "gateway logs should include endpoint")
+    try expect(!event.correlationID.isEmpty, "gateway logs should include a correlation id")
+    try expect(!String(describing: logger.events).contains("secret-token"), "gateway logs should not contain API keys")
+    try expect(!String(describing: logger.events).contains("Bearer"), "gateway logs should not contain authorization headers")
+}
+
 func testFetchSpendRowsDoesNotComputeSnapshot() async throws {
     let loader = StubURLLoader(data: try fixtureData("spend-logs-summary.json"))
     let client = LiteLLMClient(baseURL: URL(string: "https://litellm.example.internal")!, apiKey: "secret-token", loader: loader)
@@ -864,6 +883,49 @@ func testFetchUserDailyActivityDoesNotLogPayloads() async throws {
 
     try expectEqual(analytics.totalSpendUSD, Decimal(string: "65.5663")!, "client should return decoded activity total")
     try expect(!String(describing: logger.events).contains("65.5663"), "logs should not include raw spend payload values")
+}
+
+func testLiteLLMGatewayAdapterMapsUserContext() async throws {
+    let liteLLMUser = LiteLLMUserContext(userID: "user-123", email: "user@example.com", totalSpendUSD: 42, maxBudgetUSD: 80, budgetResetAt: try fixedDate("2026-05-18"))
+    let client: GatewayClientProtocol = FakeClient(userResult: .success(liteLLMUser), rowsResult: .success([]))
+
+    let user = try await client.fetchCurrentUserContext()
+
+    try expectEqual(user.userID, "user-123", "LiteLLM gateway adapter should preserve user id")
+    try expectEqual(user.email, "user@example.com", "LiteLLM gateway adapter should preserve email")
+    try expectEqual(user.totalSpendUSD, 42, "LiteLLM gateway adapter should preserve total spend")
+    try expectEqual(user.maxBudgetUSD, 80, "LiteLLM gateway adapter should preserve user budget")
+    try expectEqual(user.budgetResetAt, try fixedDate("2026-05-18"), "LiteLLM gateway adapter should preserve budget reset")
+}
+
+func testLiteLLMGatewayAdapterMapsSpendAnalyticsAndFallbackRows() async throws {
+    let analytics = analyticsSummary(totalSpendUSD: 12, dailyPoints: [], source: .userDailyActivity)
+    let rows = [SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: 12)]
+    let client: GatewayClientProtocol = FakeClient(
+        userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 12, maxBudgetUSD: nil, budgetResetAt: nil)),
+        activityResult: .success(analytics),
+        rowsResult: .success(rows)
+    )
+    let userContext = GatewayUserContext(userID: "user-123")
+    let range = DateRange(startDate: try fixedDate("2026-05-18"), endDate: try fixedDate("2026-05-19"))
+
+    try expectEqual(try await client.fetchSpendAnalytics(range: range, userContext: userContext), analytics, "LiteLLM gateway adapter should forward analytics requests")
+    try expectEqual(try await client.fetchSpendRows(range: range, userContext: userContext), rows, "LiteLLM gateway adapter should forward fallback row requests")
+}
+
+func testLiteLLMGatewayAdapterMapsKeyContextEndpoints() async throws {
+    let currentKey = KeySpendSummary(alias: "current", name: nil, spendUSD: 4, maxBudgetUSD: 10, budgetResetAt: nil, lastActiveAt: nil)
+    let ownedKey = KeySpendSummary(alias: "owned", name: nil, spendUSD: 2, maxBudgetUSD: nil, budgetResetAt: nil, lastActiveAt: nil)
+    let client: GatewayClientProtocol = FakeClient(
+        userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        rowsResult: .success([]),
+        currentKeyResult: .success(currentKey),
+        userKeysResult: .success([ownedKey])
+    )
+    let userContext = GatewayUserContext(userID: "user-123")
+
+    try expectEqual(try await client.fetchCurrentKeyContext(userContext: userContext), currentKey, "LiteLLM gateway adapter should forward current key requests")
+    try expectEqual(try await client.fetchOwnedKeyContexts(userContext: userContext), [ownedKey], "LiteLLM gateway adapter should forward owned key requests")
 }
 
 func testReleaseUpdateCheckerDetectsNewerRelease() async throws {
@@ -1078,6 +1140,36 @@ func testConfigurationStorePersistsBaseURL() throws {
     let configuration = try store.loadConfiguration()
 
     try expectEqual(configuration.baseURL, baseURL, "configuration store should persist base URL")
+}
+
+func testConfigurationStoreDefaultsGatewayProviderToLiteLLM() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    let store = LocalAppConfigurationStore(fileURL: fileURL, legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused"))
+
+    let configuration = try store.loadConfiguration()
+
+    try expectEqual(configuration.gatewayProvider, .litellm, "configuration should default to LiteLLM gateway provider")
+}
+
+func testConfigurationStorePersistsGatewayProvider() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    let store = LocalAppConfigurationStore(fileURL: fileURL, legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused"))
+
+    try store.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://bifrost.example.internal")!, spendLimitUSD: 80, gatewayProvider: .bifrost))
+    let configuration = try store.loadConfiguration()
+
+    try expectEqual(configuration.gatewayProvider, .bifrost, "configuration store should persist gateway provider")
+}
+
+func testConfigurationStoreFallsBackToLiteLLMForInvalidGatewayValue() throws {
+    let fileURL = temporaryConfigurationFileURL()
+    try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"baseURL":"https://gateway.example.internal","spendLimitUSD":"80","gatewayProvider":"unknown"}"#.utf8).write(to: fileURL)
+    let store = LocalAppConfigurationStore(fileURL: fileURL, legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused"))
+
+    let configuration = try store.loadConfiguration()
+
+    try expectEqual(configuration.gatewayProvider, .litellm, "invalid gateway provider should fall back to LiteLLM")
 }
 
 func testConfigurationStoreFallsBackOnInvalidValues() throws {
@@ -1405,6 +1497,25 @@ func testSpendServiceStaleCacheIsScopedByBaseURL() async throws {
     }
 }
 
+func testSpendServicePassesConfiguredGatewayProviderToFactory() async throws {
+    let recorder = ProviderRecorder()
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://bifrost.example.internal")!, spendLimitUSD: 80, gatewayProvider: .bifrost)),
+        gatewayClientFactory: { provider, _, _ in
+            recorder.provider = provider
+            return FakeClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+                rowsResult: .success([SpendLogSummaryRow(date: try! fixedDate("2026-05-18"), spendUSD: 10)])
+            )
+        }
+    )
+
+    _ = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    try expectEqual(recorder.provider, .bifrost, "spend service should pass configured gateway provider into the client factory")
+}
+
 func testAuthFailureReturnsAuthFailedWithoutRetrying() async throws {
     let service = SpendService(
         apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
@@ -1689,6 +1800,62 @@ func testInvalidSettingsSaveKeepsSettingsMode() async throws {
 
     try expectEqual(viewModel.selectedPopoverMode, .settings, "failed settings save should keep settings mode visible")
     try expectEqual(viewModel.settingsErrorMessage, "Daily budget must be a positive dollar amount", "failed settings save should expose validation error")
+}
+
+@MainActor
+func testSettingsModeShowsGatewaySelector() async throws {
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80))
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), configurationStore: configurationStore)
+
+    await viewModel.openSettings()
+
+    try expectEqual(viewModel.gatewayProviderOptions, [.litellm, .bifrost], "settings mode should expose supported gateway providers")
+    try expectEqual(viewModel.gatewayProviderDraft, .litellm, "settings mode should draft the persisted gateway provider")
+}
+
+@MainActor
+func testChangingGatewayDraftDoesNotApplyUntilSave() async throws {
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80, gatewayProvider: .litellm))
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), configurationStore: configurationStore)
+
+    viewModel.gatewayProviderDraft = .bifrost
+
+    try expectEqual(try configurationStore.loadConfiguration().gatewayProvider, .litellm, "gateway draft changes should not persist before Save")
+}
+
+@MainActor
+func testSavingGatewayClearsEndpointScopedStateAndRequiresRefresh() async throws {
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80, gatewayProvider: .litellm))
+    let keyContext = KeyContextSnapshot(currentKey: keySummary(alias: "old", spend: 1), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), keyContextService: RecordingKeyContextService(results: []), configurationStore: configurationStore)
+    await viewModel.openSettings()
+    viewModel.currentSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.menuBarSnapshot = try snapshot(range: .today, total: 40)
+    viewModel.currentAnalyticsSummary = analyticsSummary(totalSpendUSD: 40, dailyPoints: [], source: .userDailyActivity)
+    viewModel.keyContextSnapshot = keyContext
+    viewModel.gatewayProviderDraft = .bifrost
+    viewModel.baseURLDraft = "https://litellm.example.internal"
+    viewModel.spendLimitDraft = "80"
+
+    viewModel.saveSettings()
+
+    try expectEqual(try configurationStore.loadConfiguration().gatewayProvider, .bifrost, "settings save should persist selected gateway provider")
+    try expectEqual(viewModel.currentSnapshot, nil, "gateway changes should clear current spend from the old provider")
+    try expectEqual(viewModel.menuBarSnapshot, nil, "gateway changes should clear menu bar spend from the old provider")
+    try expectEqual(viewModel.currentAnalyticsSummary, nil, "gateway changes should clear analytics from the old provider")
+    try expectEqual(viewModel.keyContextSnapshot, nil, "gateway changes should clear key context from the old provider")
 }
 
 func testSpendServiceScalesBudgetBySelectedRange() async throws {
@@ -3137,6 +3304,26 @@ func testKeyEndpointsMapUnauthorizedWithoutBreakingSpend() async throws {
     }
 }
 
+func testKeyContextServicePassesConfiguredGatewayProviderToFactory() async throws {
+    let recorder = ProviderRecorder()
+    let service = KeyContextService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://bifrost.example.internal")!, spendLimitUSD: 80, gatewayProvider: .bifrost)),
+        gatewayClientFactory: { provider, _, _ in
+            recorder.provider = provider
+            return RecordingKeyClient(
+                userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+                currentKeyResult: .success(keySummary(alias: "Current", spend: 1)),
+                userKeysResult: .success([])
+            )
+        }
+    )
+
+    _ = await service.refresh(userContext: nil, now: try fixedDate("2026-05-18"))
+
+    try expectEqual(recorder.provider, .bifrost, "key context service should pass configured gateway provider into the client factory")
+}
+
 func testKeyContextUsesStaleValueWhenAvailable() async throws {
     let stale = KeyContextSnapshot(currentKey: keySummary(alias: "Old", spend: 1), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
     let client = RecordingKeyClient(
@@ -3407,6 +3594,13 @@ func testSettingsModeShowsDataSource() throws {
     try expectEqual(rows["Source"], "Daily activity", "settings diagnostics should show current spend data source")
 }
 
+func testSettingsModeShowsGatewayProvider() throws {
+    let presentation = SettingsPresentation.make(baseURLText: "https://bifrost.example.internal", spendLimitText: "80", gatewayProvider: .bifrost, snapshot: nil, settingsError: nil)
+    let rows = Dictionary(uniqueKeysWithValues: presentation.diagnosticRows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Gateway"], "Bifrost", "settings diagnostics should show the selected gateway provider")
+}
+
 @MainActor
 func testSettingsModeCanClearAPIKey() async throws {
     let store = MutableAPIKeyStore()
@@ -3627,6 +3821,9 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testDoesNotExposeKeyInErrorDescription", testDoesNotExposeKeyInErrorDescription),
     ("testConfigurationStorePersistsSpendLimit", testConfigurationStorePersistsSpendLimit),
     ("testConfigurationStorePersistsBaseURL", testConfigurationStorePersistsBaseURL),
+    ("testConfigurationStoreDefaultsGatewayProviderToLiteLLM", testConfigurationStoreDefaultsGatewayProviderToLiteLLM),
+    ("testConfigurationStorePersistsGatewayProvider", testConfigurationStorePersistsGatewayProvider),
+    ("testConfigurationStoreFallsBackToLiteLLMForInvalidGatewayValue", testConfigurationStoreFallsBackToLiteLLMForInvalidGatewayValue),
     ("testConfigurationStoreFallsBackOnInvalidValues", testConfigurationStoreFallsBackOnInvalidValues),
     ("testConfigurationStoreRejectsNonHTTPSchemes", testConfigurationStoreRejectsNonHTTPSchemes),
     ("testConfigurationStoreNormalizesSecretBearingBaseURLOnSave", testConfigurationStoreNormalizesSecretBearingBaseURLOnSave),
@@ -3675,6 +3872,7 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testKeysModeShowsScopedError", testKeysModeShowsScopedError),
     ("testSettingsModeShowsCredentialSourceWithoutSecretPathByDefault", testSettingsModeShowsCredentialSourceWithoutSecretPathByDefault),
     ("testSettingsModeShowsDataSource", testSettingsModeShowsDataSource),
+    ("testSettingsModeShowsGatewayProvider", testSettingsModeShowsGatewayProvider),
     ("testSettingsModeShowsBaseURL", testSettingsModeShowsBaseURL),
     ("testSettingsModeShowsUnconfiguredBaseURL", testSettingsModeShowsUnconfiguredBaseURL),
     ("testSettingsModeDocumentsLocalFileStoreRisk", testSettingsModeDocumentsLocalFileStoreRisk),
@@ -3718,11 +3916,16 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testMapsUnauthorized", testMapsUnauthorized),
     ("testMapsFullyInvalidJSONToMalformedResponse", testMapsFullyInvalidJSONToMalformedResponse),
     ("testRedactsAuthorizationHeaderFromLogs", testRedactsAuthorizationHeaderFromLogs),
+    ("testGatewayLogsIncludeProviderEndpointAndCorrelationIDWithoutSecrets", testGatewayLogsIncludeProviderEndpointAndCorrelationIDWithoutSecrets),
     ("testFetchSpendRowsDoesNotComputeSnapshot", testFetchSpendRowsDoesNotComputeSnapshot),
     ("testFetchUserDailyActivityDoesNotLogPayloads", testFetchUserDailyActivityDoesNotLogPayloads),
+    ("testLiteLLMGatewayAdapterMapsUserContext", testLiteLLMGatewayAdapterMapsUserContext),
+    ("testLiteLLMGatewayAdapterMapsSpendAnalyticsAndFallbackRows", testLiteLLMGatewayAdapterMapsSpendAnalyticsAndFallbackRows),
+    ("testLiteLLMGatewayAdapterMapsKeyContextEndpoints", testLiteLLMGatewayAdapterMapsKeyContextEndpoints),
     ("testReleaseUpdateCheckerDetectsNewerRelease", testReleaseUpdateCheckerDetectsNewerRelease),
     ("testReleaseUpdateCheckerIgnoresSameVersion", testReleaseUpdateCheckerIgnoresSameVersion),
     ("testKeyEndpointsMapUnauthorizedWithoutBreakingSpend", testKeyEndpointsMapUnauthorizedWithoutBreakingSpend),
+    ("testKeyContextServicePassesConfiguredGatewayProviderToFactory", testKeyContextServicePassesConfiguredGatewayProviderToFactory),
     ("testKeyContextUsesStaleValueWhenAvailable", testKeyContextUsesStaleValueWhenAvailable),
     ("testKeyContextCacheExpiresAfterFiveMinutes", testKeyContextCacheExpiresAfterFiveMinutes),
     ("testManualKeyContextRefreshBypassesFreshCache", testManualKeyContextRefreshBypassesFreshCache),
@@ -3740,6 +3943,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testReturnsStaleSnapshotOnTransientAPIFailure", testReturnsStaleSnapshotOnTransientAPIFailure),
     ("testSpendServiceStaleCacheIsScopedByCredential", testSpendServiceStaleCacheIsScopedByCredential),
     ("testSpendServiceStaleCacheIsScopedByBaseURL", testSpendServiceStaleCacheIsScopedByBaseURL),
+    ("testSpendServicePassesConfiguredGatewayProviderToFactory", testSpendServicePassesConfiguredGatewayProviderToFactory),
     ("testAuthFailureReturnsAuthFailedWithoutRetrying", testAuthFailureReturnsAuthFailedWithoutRetrying),
     ("testMissingKeyReturnsSetupRequired", testMissingKeyReturnsSetupRequired),
     ("testMissingBaseURLReturnsSetupRequired", testMissingBaseURLReturnsSetupRequired),
@@ -3755,6 +3959,9 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testInvalidBaseURLShowsSettingsError", testInvalidBaseURLShowsSettingsError),
     ("testSaveSettingsPersistsBothFieldsAndExitsSettingsMode", testSaveSettingsPersistsBothFieldsAndExitsSettingsMode),
     ("testInvalidSettingsSaveKeepsSettingsMode", testInvalidSettingsSaveKeepsSettingsMode),
+    ("testSettingsModeShowsGatewaySelector", testSettingsModeShowsGatewaySelector),
+    ("testChangingGatewayDraftDoesNotApplyUntilSave", testChangingGatewayDraftDoesNotApplyUntilSave),
+    ("testSavingGatewayClearsEndpointScopedStateAndRequiresRefresh", testSavingGatewayClearsEndpointScopedStateAndRequiresRefresh),
     ("testChangingBaseURLClearsSpendSnapshots", testChangingBaseURLClearsSpendSnapshots),
     ("testChangingBaseURLPreservesSetupPauseState", testChangingBaseURLPreservesSetupPauseState),
     ("testAPIKeyChangeClearsSpendSnapshots", testAPIKeyChangeClearsSpendSnapshots),

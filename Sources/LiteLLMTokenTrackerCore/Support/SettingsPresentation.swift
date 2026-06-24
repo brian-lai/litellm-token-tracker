@@ -17,6 +17,7 @@ public struct SettingsPresentation: Equatable, Sendable {
     public static func make(
         baseURLText: String,
         spendLimitText: String,
+        gatewayProvider: GatewayProvider = .litellm,
         snapshot: SpendSnapshot?,
         settingsError: String?,
         credentialSource: String = "Local file",
@@ -24,6 +25,7 @@ public struct SettingsPresentation: Equatable, Sendable {
     ) -> SettingsPresentation {
         let diagnostics = DiagnosticSummary.make(
             baseURLText: baseURLText,
+            gatewayProvider: gatewayProvider,
             snapshot: snapshot,
             credentialSource: credentialSource,
             lastError: lastError
@@ -50,12 +52,14 @@ public struct DiagnosticSummary: Equatable, Sendable {
 
     public static func make(
         baseURLText: String,
+        gatewayProvider: GatewayProvider = .litellm,
         snapshot: SpendSnapshot?,
         credentialSource: String = "Local file",
         lastError: String? = nil,
         includeCredentialPath: Bool = false
     ) -> DiagnosticSummary {
         var rows = [
+            Row(label: "Gateway", value: gatewayProvider.displayName),
             Row(label: "Credential", value: credentialSource),
             Row(label: "Credential path", value: includeCredentialPath ? "Configured locally" : "Hidden by default"),
             Row(label: "Endpoint", value: baseURLText.isEmpty ? "Not configured" : redactedEndpoint(baseURLText)),
