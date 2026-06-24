@@ -3536,6 +3536,13 @@ func testSettingsModeShowsDataSource() throws {
     try expectEqual(rows["Source"], "Daily activity", "settings diagnostics should show current spend data source")
 }
 
+func testSettingsModeShowsGatewayProvider() throws {
+    let presentation = SettingsPresentation.make(baseURLText: "https://bifrost.example.internal", spendLimitText: "80", gatewayProvider: .bifrost, snapshot: nil, settingsError: nil)
+    let rows = Dictionary(uniqueKeysWithValues: presentation.diagnosticRows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Gateway"], "Bifrost", "settings diagnostics should show the selected gateway provider")
+}
+
 @MainActor
 func testSettingsModeCanClearAPIKey() async throws {
     let store = MutableAPIKeyStore()
@@ -3807,6 +3814,7 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testKeysModeShowsScopedError", testKeysModeShowsScopedError),
     ("testSettingsModeShowsCredentialSourceWithoutSecretPathByDefault", testSettingsModeShowsCredentialSourceWithoutSecretPathByDefault),
     ("testSettingsModeShowsDataSource", testSettingsModeShowsDataSource),
+    ("testSettingsModeShowsGatewayProvider", testSettingsModeShowsGatewayProvider),
     ("testSettingsModeShowsBaseURL", testSettingsModeShowsBaseURL),
     ("testSettingsModeShowsUnconfiguredBaseURL", testSettingsModeShowsUnconfiguredBaseURL),
     ("testSettingsModeDocumentsLocalFileStoreRisk", testSettingsModeDocumentsLocalFileStoreRisk),

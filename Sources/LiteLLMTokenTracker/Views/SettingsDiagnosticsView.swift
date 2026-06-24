@@ -7,6 +7,12 @@ struct SettingsDiagnosticsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Picker("Gateway", selection: $viewModel.gatewayProviderDraft) {
+                ForEach(viewModel.gatewayProviderOptions, id: \.self) { provider in
+                    Text(provider.displayName).tag(provider)
+                }
+            }
+            .pickerStyle(.segmented)
             TextField("Daily budget", text: $viewModel.spendLimitDraft)
                 .textFieldStyle(.roundedBorder)
             TextField("Base URL", text: $viewModel.baseURLDraft)
