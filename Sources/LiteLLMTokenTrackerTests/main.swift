@@ -866,6 +866,49 @@ func testFetchUserDailyActivityDoesNotLogPayloads() async throws {
     try expect(!String(describing: logger.events).contains("65.5663"), "logs should not include raw spend payload values")
 }
 
+func testLiteLLMGatewayAdapterMapsUserContext() async throws {
+    let liteLLMUser = LiteLLMUserContext(userID: "user-123", email: "user@example.com", totalSpendUSD: 42, maxBudgetUSD: 80, budgetResetAt: try fixedDate("2026-05-18"))
+    let client: GatewayClientProtocol = FakeClient(userResult: .success(liteLLMUser), rowsResult: .success([]))
+
+    let user = try await client.fetchCurrentUserContext()
+
+    try expectEqual(user.userID, "user-123", "LiteLLM gateway adapter should preserve user id")
+    try expectEqual(user.email, "user@example.com", "LiteLLM gateway adapter should preserve email")
+    try expectEqual(user.totalSpendUSD, 42, "LiteLLM gateway adapter should preserve total spend")
+    try expectEqual(user.maxBudgetUSD, 80, "LiteLLM gateway adapter should preserve user budget")
+    try expectEqual(user.budgetResetAt, try fixedDate("2026-05-18"), "LiteLLM gateway adapter should preserve budget reset")
+}
+
+func testLiteLLMGatewayAdapterMapsSpendAnalyticsAndFallbackRows() async throws {
+    let analytics = analyticsSummary(totalSpendUSD: 12, dailyPoints: [], source: .userDailyActivity)
+    let rows = [SpendLogSummaryRow(date: try fixedDate("2026-05-18"), spendUSD: 12)]
+    let client: GatewayClientProtocol = FakeClient(
+        userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 12, maxBudgetUSD: nil, budgetResetAt: nil)),
+        activityResult: .success(analytics),
+        rowsResult: .success(rows)
+    )
+    let userContext = GatewayUserContext(userID: "user-123")
+    let range = DateRange(startDate: try fixedDate("2026-05-18"), endDate: try fixedDate("2026-05-19"))
+
+    try expectEqual(try await client.fetchSpendAnalytics(range: range, userContext: userContext), analytics, "LiteLLM gateway adapter should forward analytics requests")
+    try expectEqual(try await client.fetchSpendRows(range: range, userContext: userContext), rows, "LiteLLM gateway adapter should forward fallback row requests")
+}
+
+func testLiteLLMGatewayAdapterMapsKeyContextEndpoints() async throws {
+    let currentKey = KeySpendSummary(alias: "current", name: nil, spendUSD: 4, maxBudgetUSD: 10, budgetResetAt: nil, lastActiveAt: nil)
+    let ownedKey = KeySpendSummary(alias: "owned", name: nil, spendUSD: 2, maxBudgetUSD: nil, budgetResetAt: nil, lastActiveAt: nil)
+    let client: GatewayClientProtocol = FakeClient(
+        userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+        rowsResult: .success([]),
+        currentKeyResult: .success(currentKey),
+        userKeysResult: .success([ownedKey])
+    )
+    let userContext = GatewayUserContext(userID: "user-123")
+
+    try expectEqual(try await client.fetchCurrentKeyContext(userContext: userContext), currentKey, "LiteLLM gateway adapter should forward current key requests")
+    try expectEqual(try await client.fetchOwnedKeyContexts(userContext: userContext), [ownedKey], "LiteLLM gateway adapter should forward owned key requests")
+}
+
 func testReleaseUpdateCheckerDetectsNewerRelease() async throws {
     let payload = """
     {
@@ -3753,6 +3796,9 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testRedactsAuthorizationHeaderFromLogs", testRedactsAuthorizationHeaderFromLogs),
     ("testFetchSpendRowsDoesNotComputeSnapshot", testFetchSpendRowsDoesNotComputeSnapshot),
     ("testFetchUserDailyActivityDoesNotLogPayloads", testFetchUserDailyActivityDoesNotLogPayloads),
+    ("testLiteLLMGatewayAdapterMapsUserContext", testLiteLLMGatewayAdapterMapsUserContext),
+    ("testLiteLLMGatewayAdapterMapsSpendAnalyticsAndFallbackRows", testLiteLLMGatewayAdapterMapsSpendAnalyticsAndFallbackRows),
+    ("testLiteLLMGatewayAdapterMapsKeyContextEndpoints", testLiteLLMGatewayAdapterMapsKeyContextEndpoints),
     ("testReleaseUpdateCheckerDetectsNewerRelease", testReleaseUpdateCheckerDetectsNewerRelease),
     ("testReleaseUpdateCheckerIgnoresSameVersion", testReleaseUpdateCheckerIgnoresSameVersion),
     ("testKeyEndpointsMapUnauthorizedWithoutBreakingSpend", testKeyEndpointsMapUnauthorizedWithoutBreakingSpend),
