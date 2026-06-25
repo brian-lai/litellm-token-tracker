@@ -983,6 +983,8 @@ func testBifrostDashboardDecodesTokenUsageTotals() throws {
     try expectEqual(analytics.dailyPoints[0].totals.completionTokens, 500, "token buckets should map completion tokens onto matching days")
     try expectEqual(analytics.dailyPoints[0].totals.totalTokens, 1500, "token buckets should map total tokens onto matching days")
     try expectEqual(analytics.dailyPoints[0].totals.apiRequests, 4, "request buckets should map request counts onto matching days")
+    try expectEqual(analytics.dailyPoints[0].totals.successfulRequests, 3, "request buckets should map successful request counts onto matching days")
+    try expectEqual(analytics.dailyPoints[0].totals.failedRequests, 1, "request buckets should map failed request counts onto matching days")
 }
 
 func testBifrostDashboardSkipsMalformedBucketsWithoutDroppingTotals() throws {
@@ -1094,6 +1096,8 @@ func testBifrostPrimaryFailureFallsBackToLogs() async throws {
     }
     try expectEqual(snapshot.totalSpendUSD, 4, "Bifrost logs fallback should sum row spend")
     try expectEqual(snapshot.analytics?.source, .spendLogsFallback, "Bifrost fallback should mark analytics source")
+    try expectEqual(snapshot.analytics?.totals.totalTokens, 450, "Bifrost logs fallback should preserve aggregate token totals")
+    try expectEqual(snapshot.analytics?.dailyPoints.first?.totals.promptTokens, 300, "Bifrost logs fallback should preserve row token usage")
     try expectEqual(loader.requests.map { $0.url?.path }, ["/api/logs/dashboard", "/api/logs"], "Bifrost should fall back from dashboard to logs")
 }
 

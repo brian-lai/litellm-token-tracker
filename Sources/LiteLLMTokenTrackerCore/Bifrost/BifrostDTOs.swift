@@ -16,9 +16,12 @@ public enum BifrostResponseDecoder {
         let tokenBuckets = Dictionary(uniqueKeysWithValues: (overview.tokens?.buckets ?? []).compactMap { bucket in
             bucket.date.map { ($0, bucket) }
         })
-        let requestBuckets = Dictionary(uniqueKeysWithValues: (overview.requests?.buckets ?? []).compactMap { bucket in
+        let requestBucketList = overview.requests?.buckets ?? []
+        let requestBuckets = Dictionary(uniqueKeysWithValues: requestBucketList.compactMap { bucket in
             bucket.date.map { ($0, bucket) }
         })
+        let successfulRequests = requestBucketList.reduce(0) { $0 + ($1.success ?? 0) }
+        let failedRequests = requestBucketList.reduce(0) { $0 + ($1.error ?? 0) }
 
         let dailyPoints = (overview.cost?.buckets ?? []).compactMap { bucket -> DailyActivityPoint? in
             guard let date = bucket.date, let spendUSD = bucket.totalCost else {
@@ -35,9 +38,9 @@ public enum BifrostResponseDecoder {
                     completionTokens: tokens?.completionTokens ?? 0,
                     cacheCreationTokens: 0,
                     cacheReadTokens: 0,
-                    apiRequests: requests?.totalRequests ?? 0,
-                    successfulRequests: 0,
-                    failedRequests: 0
+                    apiRequests: requests?.count ?? 0,
+                    successfulRequests: requests?.success ?? 0,
+                    failedRequests: requests?.error ?? 0
                 )
             )
         }.sorted { $0.date < $1.date }
@@ -51,8 +54,8 @@ public enum BifrostResponseDecoder {
                 cacheCreationTokens: 0,
                 cacheReadTokens: 0,
                 apiRequests: stats.totalRequests ?? 0,
-                successfulRequests: stats.successfulRequests ?? 0,
-                failedRequests: stats.failedRequests ?? 0
+                successfulRequests: successfulRequests,
+                failedRequests: failedRequests
             ),
             dailyPoints: dailyPoints,
             breakdowns: [:],
@@ -112,8 +115,8 @@ public enum BifrostResponseDecoder {
                 cacheCreationTokens: 0,
                 cacheReadTokens: 0,
                 apiRequests: payload.stats?.totalRequests ?? rows.count,
-                successfulRequests: payload.stats?.successfulRequests ?? 0,
-                failedRequests: payload.stats?.failedRequests ?? 0
+                successfulRequests: payload.stats?.totalRequests ?? rows.count,
+                failedRequests: 0
             ),
             dailyPoints: dailyPoints,
             breakdowns: [:],
@@ -149,15 +152,11 @@ private struct BifrostStats: Decodable {
     let totalCost: Decimal?
     let totalTokens: Int?
     let totalRequests: Int?
-    let successfulRequests: Int?
-    let failedRequests: Int?
 
     enum CodingKeys: String, CodingKey {
         case totalCost = "total_cost"
         case totalTokens = "total_tokens"
         case totalRequests = "total_requests"
-        case successfulRequests = "successful_requests"
-        case failedRequests = "failed_requests"
     }
 }
 
@@ -191,14 +190,11 @@ private struct TokenBucket: Decodable {
 
 private struct RequestBucket: Decodable {
     let timestamp: Date?
-    let totalRequests: Int?
+    let count: Int?
+    let success: Int?
+    let error: Int?
 
     var date: Date? { timestamp }
-
-    enum CodingKeys: String, CodingKey {
-        case timestamp
-        case totalRequests = "total_requests"
-    }
 }
 
 private struct LogsPayload: Decodable {

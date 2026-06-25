@@ -40,9 +40,37 @@ public struct GatewayUserContext: Equatable, Sendable {
 public protocol GatewayClientProtocol: Sendable {
     func fetchCurrentUserContext() async throws -> GatewayUserContext
     func fetchSpendAnalytics(range: DateRange, userContext: GatewayUserContext?) async throws -> SpendAnalyticsSummary
+    func fetchFallbackSpendAnalytics(range: DateRange, userContext: GatewayUserContext?) async throws -> SpendAnalyticsSummary
     func fetchSpendRows(range: DateRange, userContext: GatewayUserContext?) async throws -> [SpendLogSummaryRow]
     func fetchCurrentKeyContext(userContext: GatewayUserContext?) async throws -> KeySpendSummary
     func fetchOwnedKeyContexts(userContext: GatewayUserContext?) async throws -> [KeySpendSummary]
+}
+
+public extension GatewayClientProtocol {
+    func fetchFallbackSpendAnalytics(range: DateRange, userContext: GatewayUserContext?) async throws -> SpendAnalyticsSummary {
+        let rows = try await fetchSpendRows(range: range, userContext: userContext)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = range.timeZone
+        let groupedRows = Dictionary(grouping: rows) { row in
+            calendar.startOfDay(for: row.date)
+        }
+        let dailyPoints = groupedRows
+            .map { date, rows in
+                DailyActivityPoint(
+                    date: date,
+                    spendUSD: rows.reduce(Decimal(0)) { $0 + $1.spendUSD },
+                    totals: .zero
+                )
+            }
+            .sorted { $0.date < $1.date }
+        return SpendAnalyticsSummary(
+            totalSpendUSD: dailyPoints.reduce(Decimal(0)) { $0 + $1.spendUSD },
+            totals: .zero,
+            dailyPoints: dailyPoints,
+            breakdowns: [:],
+            source: .spendLogsFallback
+        )
+    }
 }
 
 public extension GatewayUserContext {

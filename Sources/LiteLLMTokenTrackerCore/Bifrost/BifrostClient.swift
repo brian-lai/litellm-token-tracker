@@ -40,6 +40,16 @@ public struct BifrostClient: GatewayClientProtocol {
         return rows
     }
 
+    public func fetchFallbackSpendAnalytics(range: DateRange, userContext: GatewayUserContext?) async throws -> SpendAnalyticsSummary {
+        let request = try makeLogsRequest(range: range)
+        let data = try await perform(request, endpoint: "/api/logs").data
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = range.timeZone
+        let analytics = try BifrostResponseDecoder.decodeLogsAnalytics(from: data, calendar: calendar)
+        logger.log(AppLogEvent(correlationID: correlationID(), gatewayProvider: .bifrost, endpoint: "/api/logs", rowCount: analytics.dailyPoints.count))
+        return analytics
+    }
+
     public func fetchCurrentKeyContext(userContext: GatewayUserContext?) async throws -> KeySpendSummary {
         throw GatewayClientError.notImplemented
     }
