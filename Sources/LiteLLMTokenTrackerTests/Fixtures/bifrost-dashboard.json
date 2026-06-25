@@ -3,9 +3,7 @@
     "stats": {
       "total_cost": 12.75,
       "total_tokens": 3750,
-      "total_requests": 9,
-      "successful_requests": 8,
-      "failed_requests": 1
+      "total_requests": 9
     },
     "cost": {
       "buckets": [
