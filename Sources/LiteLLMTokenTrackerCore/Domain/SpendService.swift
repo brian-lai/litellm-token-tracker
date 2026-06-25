@@ -41,7 +41,7 @@ public struct SpendService: SpendServicing {
             let apiKey = try apiKeyStore.readAPIKey()
             let configuration = try configurationStore.loadConfiguration()
             guard let baseURL = configuration.baseURL else {
-                return .setupRequired(message: "LiteLLM base URL is missing")
+                return .setupRequired(message: "\(configuration.gatewayProvider.displayName) base URL is missing")
             }
             let scope = cacheScope(baseURL: baseURL, apiKey: apiKey, gatewayProvider: configuration.gatewayProvider)
             currentScope = scope
@@ -77,9 +77,11 @@ public struct SpendService: SpendServicing {
             try? cache.saveSnapshot(snapshot, scope: scope)
             return .refreshed(snapshot)
         } catch APIKeyStoreError.missingKey {
-            return .setupRequired(message: "LiteLLM API key is missing")
+            let provider = (try? configurationStore.loadConfiguration().gatewayProvider) ?? .litellm
+            return .setupRequired(message: "\(provider.displayName) API key is missing")
         } catch LiteLLMClientError.unauthorized, GatewayClientError.unauthorized {
-            return .authFailed(message: "LiteLLM API key was rejected")
+            let provider = (try? configurationStore.loadConfiguration().gatewayProvider) ?? .litellm
+            return .authFailed(message: "\(provider.displayName) API key was rejected")
         } catch {
             if let currentScope, let stale = try? cache.loadSnapshot(for: range, scope: currentScope) {
                 return .stale(stale.markingStale(), message: "Showing last known spend")

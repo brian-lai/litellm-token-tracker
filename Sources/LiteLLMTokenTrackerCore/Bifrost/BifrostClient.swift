@@ -51,11 +51,15 @@ public struct BifrostClient: GatewayClientProtocol {
     }
 
     public func fetchCurrentKeyContext(userContext: GatewayUserContext?) async throws -> KeySpendSummary {
-        throw GatewayClientError.notImplemented
+        let request = try makeQuotaRequest()
+        let data = try await perform(request, endpoint: "/api/governance/virtual-keys/quota").data
+        return try BifrostResponseDecoder.decodeQuota(from: data)
     }
 
     public func fetchOwnedKeyContexts(userContext: GatewayUserContext?) async throws -> [KeySpendSummary] {
-        throw GatewayClientError.notImplemented
+        let request = try makeVirtualKeysRequest()
+        let data = try await perform(request, endpoint: "/api/governance/virtual-keys").data
+        return try BifrostResponseDecoder.decodeVirtualKeys(from: data)
     }
 
     public func makeLogsRequest(range: DateRange) throws -> URLRequest {
@@ -76,6 +80,22 @@ public struct BifrostClient: GatewayClientProtocol {
         components.queryItems = [
             URLQueryItem(name: "start_time", value: BifrostClient.rfc3339Formatter.string(from: range.startDate)),
             URLQueryItem(name: "end_time", value: BifrostClient.rfc3339Formatter.string(from: range.endDate))
+        ]
+        return try request(from: components)
+    }
+
+    public func makeQuotaRequest() throws -> URLRequest {
+        var request = try request(from: components(path: "/api/governance/virtual-keys/quota"))
+        request.setValue(nil, forHTTPHeaderField: "Authorization")
+        request.setValue(apiKey, forHTTPHeaderField: "x-bf-vk")
+        return request
+    }
+
+    public func makeVirtualKeysRequest() throws -> URLRequest {
+        var components = try components(path: "/api/governance/virtual-keys")
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: "100"),
+            URLQueryItem(name: "offset", value: "0")
         ]
         return try request(from: components)
     }

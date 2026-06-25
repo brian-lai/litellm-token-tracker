@@ -48,7 +48,7 @@ public struct KeyBudgetPresentation: Equatable, Sendable {
                         lastActiveText: lastActiveText(for: key.lastActiveAt, calendar: calendar)
                     )
                 },
-            statusText: errorMessage ?? (snapshot.isStale ? "Showing last known key context" : nil),
+            statusText: errorMessage ?? snapshot.ownedKeysUnavailableMessage ?? (snapshot.isStale ? "Showing last known key context" : nil),
             isEmpty: currentKey == nil && snapshot.ownedKeys.isEmpty
         )
     }

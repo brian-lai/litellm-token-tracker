@@ -3,18 +3,20 @@ import Foundation
 public struct KeyContextSnapshot: Equatable, Sendable {
     public let currentKey: KeySpendSummary?
     public let ownedKeys: [KeySpendSummary]
+    public let ownedKeysUnavailableMessage: String?
     public let refreshedAt: Date
     public let isStale: Bool
 
-    public init(currentKey: KeySpendSummary?, ownedKeys: [KeySpendSummary], refreshedAt: Date, isStale: Bool) {
+    public init(currentKey: KeySpendSummary?, ownedKeys: [KeySpendSummary], ownedKeysUnavailableMessage: String? = nil, refreshedAt: Date, isStale: Bool) {
         self.currentKey = currentKey
         self.ownedKeys = ownedKeys
+        self.ownedKeysUnavailableMessage = ownedKeysUnavailableMessage
         self.refreshedAt = refreshedAt
         self.isStale = isStale
     }
 
     public func markingStale() -> KeyContextSnapshot {
-        KeyContextSnapshot(currentKey: currentKey, ownedKeys: ownedKeys, refreshedAt: refreshedAt, isStale: true)
+        KeyContextSnapshot(currentKey: currentKey, ownedKeys: ownedKeys, ownedKeysUnavailableMessage: ownedKeysUnavailableMessage, refreshedAt: refreshedAt, isStale: true)
     }
 }
 
@@ -76,7 +78,7 @@ public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
             let apiKey = try apiKeyStore.readAPIKey()
             let configuration = try configurationStore.loadConfiguration()
             guard let baseURL = configuration.baseURL else {
-                return .failed(message: "LiteLLM base URL is missing")
+                return .failed(message: "\(configuration.gatewayProvider.displayName) base URL is missing")
             }
             let scope = cacheScope(baseURL: baseURL, apiKey: apiKey, gatewayProvider: configuration.gatewayProvider)
             currentScope = scope
@@ -86,8 +88,14 @@ public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
             let client = clientFactory(configuration.gatewayProvider, baseURL, apiKey)
             let user = try await resolvedUserContext(userContext, client: client, scope: scope)
             let currentKey = try await client.fetchCurrentKeyContext(userContext: user)
-            let ownedKeys = try await client.fetchOwnedKeyContexts(userContext: user)
-            let snapshot = KeyContextSnapshot(currentKey: currentKey, ownedKeys: ownedKeys, refreshedAt: now, isStale: false)
+            let ownedResult = await ownedKeyResult(client: client, user: user, provider: configuration.gatewayProvider)
+            let snapshot = KeyContextSnapshot(
+                currentKey: currentKey,
+                ownedKeys: ownedResult.keys,
+                ownedKeysUnavailableMessage: ownedResult.message,
+                refreshedAt: now,
+                isStale: false
+            )
             if let liteLLMUserContext = user.liteLLMUserContext {
                 save(snapshot: snapshot, userContext: liteLLMUserContext, scope: scope)
             } else {
@@ -96,7 +104,7 @@ public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
             return .refreshed(snapshot)
         } catch LiteLLMClientError.unauthorized, GatewayClientError.unauthorized {
             clearCache()
-            return .authFailed(message: "LiteLLM key context was rejected")
+            return .authFailed(message: "\(activeProviderName(currentScope: currentScope)) key context was rejected")
         } catch {
             if let currentScope, let stale = loadAnyCache(scope: currentScope) {
                 return .stale(stale.markingStale(), message: "Showing last known key context")
@@ -121,6 +129,31 @@ public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
             return GatewayUserContext(liteLLMUserContext: cached)
         }
         return try await client.fetchCurrentUserContext()
+    }
+
+    private func ownedKeyResult(client: GatewayClientProtocol, user: GatewayUserContext, provider: GatewayProvider) async -> (keys: [KeySpendSummary], message: String?) {
+        do {
+            return (try await client.fetchOwnedKeyContexts(userContext: user), nil)
+        } catch {
+            if provider == .bifrost, isOwnedKeyScopeError(error) {
+                return ([], "Bifrost owned keys require management API scope")
+            }
+            return ([], nil)
+        }
+    }
+
+    private func isOwnedKeyScopeError(_ error: Error) -> Bool {
+        switch error {
+        case GatewayClientError.unauthorized, GatewayClientError.forbidden, GatewayClientError.insufficientScope:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func activeProviderName(currentScope: String?) -> String {
+        guard let currentScope else { return "LiteLLM" }
+        return currentScope.hasPrefix("\(GatewayProvider.bifrost.rawValue)|") ? "Bifrost" : "LiteLLM"
     }
 
     private func loadFreshCache(now: Date, scope: String) -> KeyContextSnapshot? {
