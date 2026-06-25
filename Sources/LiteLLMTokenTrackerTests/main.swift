@@ -1162,6 +1162,104 @@ func testBifrostFallbackEmitsFallbackSourceSignal() async throws {
     try expectEqual(snapshot.analytics?.source, .spendLogsFallback, "Bifrost fallback should emit fallback source signal")
 }
 
+func testBifrostQuotaDecodesCurrentKeyBudgetContext() throws {
+    let key = try BifrostResponseDecoder.decodeQuota(from: fixtureData("bifrost-quota.json"))
+
+    try expectEqual(key.alias, "Claude Code Bifrost", "quota should decode virtual key name")
+    try expectEqual(key.name, "vk-current", "quota should decode virtual key id")
+    try expectEqual(key.spendUSD, Decimal(string: "12.5")!, "quota should decode current usage")
+    try expectEqual(key.maxBudgetUSD, 80, "quota should decode max budget")
+}
+
+func testBifrostQuotaDecodesBudgetResetAndUsage() throws {
+    let key = try BifrostResponseDecoder.decodeQuota(from: fixtureData("bifrost-quota.json"))
+
+    try expectEqual(key.budgetResetAt, try fixedDate("2026-05-01"), "quota should decode last reset")
+    try expectEqual(key.lastActiveAt, nil, "quota endpoint does not expose last active time")
+}
+
+func testBifrostQuotaMalformedResponseMapsToMalformedError() throws {
+    do {
+        _ = try BifrostResponseDecoder.decodeQuota(from: Data(#"{"budgets":[]}"#.utf8))
+        throw TestFailure(description: "malformed quota should throw")
+    } catch GatewayClientError.malformedResponse {
+        return
+    }
+}
+
+func testBifrostOwnedKeysSuccessMapsVirtualKeyRows() throws {
+    let keys = try BifrostResponseDecoder.decodeVirtualKeys(from: fixtureData("bifrost-virtual-keys.json"))
+
+    try expectEqual(keys.count, 2, "owned virtual keys should decode")
+    try expectEqual(keys[0].alias, "Large key", "owned key name should map to alias")
+    try expectEqual(keys[0].spendUSD, 25, "owned key current usage should map to spend")
+    try expectEqual(keys[0].maxBudgetUSD, 100, "owned key max limit should map to budget")
+}
+
+func testBifrostOwnedKeysUnauthorizedReturnsEmptyOwnedKeysWithScopedMessage() async throws {
+    let loader = SequenceURLLoader(responses: [
+        .init(data: try fixtureData("bifrost-quota.json")),
+        .init(data: Data(#"{"error":"unauthorized"}"#.utf8), statusCode: 401)
+    ])
+    let service = KeyContextService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://bifrost.example.internal")!, spendLimitUSD: 80, gatewayProvider: .bifrost)),
+        gatewayClientFactory: { _, baseURL, apiKey in BifrostClient(baseURL: baseURL, apiKey: apiKey, loader: loader) }
+    )
+
+    let result = await service.refresh(userContext: nil, now: try fixedDate("2026-05-18"))
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "owned key unauthorized should keep current key visible")
+    }
+    try expectEqual(snapshot.currentKey?.displayName, "Claude Code Bifrost", "current Bifrost key should remain visible")
+    try expectEqual(snapshot.ownedKeys, [], "owned keys should degrade to empty")
+    try expectEqual(snapshot.ownedKeysUnavailableMessage, "Bifrost owned keys require management API scope", "owned key scope message should be scoped")
+}
+
+func testBifrostOwnedKeysForbiddenKeepsCurrentKeyVisible() async throws {
+    let loader = SequenceURLLoader(responses: [
+        .init(data: try fixtureData("bifrost-quota.json")),
+        .init(data: Data(#"{"error":"forbidden"}"#.utf8), statusCode: 403)
+    ])
+    let service = KeyContextService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://bifrost.example.internal")!, spendLimitUSD: 80, gatewayProvider: .bifrost)),
+        gatewayClientFactory: { _, baseURL, apiKey in BifrostClient(baseURL: baseURL, apiKey: apiKey, loader: loader) }
+    )
+
+    let result = await service.refresh(userContext: nil, now: try fixedDate("2026-05-18"))
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "owned key forbidden should keep current key visible")
+    }
+    try expectEqual(snapshot.currentKey?.displayName, "Claude Code Bifrost", "current Bifrost key should remain visible")
+    try expectEqual(snapshot.ownedKeysUnavailableMessage, "Bifrost owned keys require management API scope", "forbidden should show scoped owned-key message")
+}
+
+func testBifrostOwnedKeysInsufficientScopeKeepsCurrentKeyVisibleWithScopedMessage() async throws {
+    let service = KeyContextService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://bifrost.example.internal")!, spendLimitUSD: 80, gatewayProvider: .bifrost)),
+        gatewayClientFactory: { _, _, _ in
+            FakeClient(
+                userResult: .success(LiteLLMUserContext(userID: "unused", email: nil, totalSpendUSD: 0, maxBudgetUSD: nil, budgetResetAt: nil)),
+                rowsResult: .success([]),
+                currentKeyResult: .success(keySummary(alias: "Current", spend: 1)),
+                userKeysResult: .failure(GatewayClientError.insufficientScope)
+            )
+        }
+    )
+
+    let result = await service.refresh(userContext: nil, now: try fixedDate("2026-05-18"))
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "insufficient scope should keep current key visible")
+    }
+    try expectEqual(snapshot.currentKey?.displayName, "Current", "current key should remain visible")
+    try expectEqual(snapshot.ownedKeysUnavailableMessage, "Bifrost owned keys require management API scope", "insufficient scope should show scoped owned-key message")
+}
+
 func testReleaseUpdateCheckerDetectsNewerRelease() async throws {
     let payload = """
     {
@@ -4142,7 +4240,11 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testBifrostDashboardDecodesTokenUsageTotals", testBifrostDashboardDecodesTokenUsageTotals),
     ("testBifrostDashboardSkipsMalformedBucketsWithoutDroppingTotals", testBifrostDashboardSkipsMalformedBucketsWithoutDroppingTotals),
     ("testBifrostLogsDecodesRowCostAndTokenUsage", testBifrostLogsDecodesRowCostAndTokenUsage),
-    ("testBifrostLogsDecodesStatsTotals", testBifrostLogsDecodesStatsTotals)
+    ("testBifrostLogsDecodesStatsTotals", testBifrostLogsDecodesStatsTotals),
+    ("testBifrostQuotaDecodesCurrentKeyBudgetContext", testBifrostQuotaDecodesCurrentKeyBudgetContext),
+    ("testBifrostQuotaDecodesBudgetResetAndUsage", testBifrostQuotaDecodesBudgetResetAndUsage),
+    ("testBifrostQuotaMalformedResponseMapsToMalformedError", testBifrostQuotaMalformedResponseMapsToMalformedError),
+    ("testBifrostOwnedKeysSuccessMapsVirtualKeyRows", testBifrostOwnedKeysSuccessMapsVirtualKeyRows)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [
@@ -4167,6 +4269,9 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testBifrostFallbackFailureReturnsStaleSnapshotWhenAvailable", testBifrostFallbackFailureReturnsStaleSnapshotWhenAvailable),
     ("testBifrostLogsIncludeProviderEndpointAndCorrelationIDWithoutSecrets", testBifrostLogsIncludeProviderEndpointAndCorrelationIDWithoutSecrets),
     ("testBifrostFallbackEmitsFallbackSourceSignal", testBifrostFallbackEmitsFallbackSourceSignal),
+    ("testBifrostOwnedKeysUnauthorizedReturnsEmptyOwnedKeysWithScopedMessage", testBifrostOwnedKeysUnauthorizedReturnsEmptyOwnedKeysWithScopedMessage),
+    ("testBifrostOwnedKeysForbiddenKeepsCurrentKeyVisible", testBifrostOwnedKeysForbiddenKeepsCurrentKeyVisible),
+    ("testBifrostOwnedKeysInsufficientScopeKeepsCurrentKeyVisibleWithScopedMessage", testBifrostOwnedKeysInsufficientScopeKeepsCurrentKeyVisibleWithScopedMessage),
     ("testReleaseUpdateCheckerDetectsNewerRelease", testReleaseUpdateCheckerDetectsNewerRelease),
     ("testReleaseUpdateCheckerIgnoresSameVersion", testReleaseUpdateCheckerIgnoresSameVersion),
     ("testKeyEndpointsMapUnauthorizedWithoutBreakingSpend", testKeyEndpointsMapUnauthorizedWithoutBreakingSpend),

@@ -1,0 +1,32 @@
+{
+  "virtual_keys": [
+    {
+      "id": "vk-large",
+      "name": "Large key",
+      "created_at": "2026-05-01T00:00:00Z",
+      "budgets": [
+        {
+          "max_limit": 100,
+          "last_reset": "2026-05-01T00:00:00Z",
+          "current_usage": 25
+        }
+      ]
+    },
+    {
+      "id": "vk-small",
+      "name": "Small key",
+      "created_at": "2026-05-02T00:00:00Z",
+      "budgets": [
+        {
+          "max_limit": 50,
+          "last_reset": "2026-05-01T00:00:00Z",
+          "current_usage": 4.5
+        }
+      ]
+    }
+  ],
+  "count": 2,
+  "total_count": 2,
+  "limit": 100,
+  "offset": 0
+}

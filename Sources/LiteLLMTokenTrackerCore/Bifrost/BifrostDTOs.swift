@@ -73,6 +73,45 @@ public enum BifrostResponseDecoder {
         }
     }
 
+    public static func decodeQuota(from data: Data) throws -> KeySpendSummary {
+        let payload: BifrostQuotaPayload
+        do {
+            payload = try JSONDecoder.bifrost.decode(BifrostQuotaPayload.self, from: data)
+        } catch {
+            throw GatewayClientError.malformedResponse
+        }
+        guard payload.virtualKeyName != nil || !payload.budgets.isEmpty else {
+            throw GatewayClientError.malformedResponse
+        }
+        return KeySpendSummary(
+            alias: payload.virtualKeyName,
+            name: payload.budgets.first?.virtualKeyID,
+            spendUSD: payload.budgets.reduce(Decimal(0)) { $0 + ($1.currentUsage ?? 0) },
+            maxBudgetUSD: payload.budgets.reduceOptionalDecimal(\.maxLimit),
+            budgetResetAt: payload.budgets.compactMap(\.lastReset).min(),
+            lastActiveAt: nil
+        )
+    }
+
+    public static func decodeVirtualKeys(from data: Data) throws -> [KeySpendSummary] {
+        let payload: BifrostVirtualKeysPayload
+        do {
+            payload = try JSONDecoder.bifrost.decode(BifrostVirtualKeysPayload.self, from: data)
+        } catch {
+            throw GatewayClientError.malformedResponse
+        }
+        return payload.virtualKeys.map { key in
+            KeySpendSummary(
+                alias: key.name,
+                name: key.id,
+                spendUSD: key.budgets.reduce(Decimal(0)) { $0 + ($1.currentUsage ?? 0) },
+                maxBudgetUSD: key.budgets.reduceOptionalDecimal(\.maxLimit),
+                budgetResetAt: key.budgets.compactMap(\.lastReset).min(),
+                lastActiveAt: key.createdAt
+            )
+        }
+    }
+
     public static func decodeLogsAnalytics(from data: Data, calendar: Calendar) throws -> SpendAnalyticsSummary {
         let payload = try decodeLogsPayload(from: data)
         let rows = payload.logs.compactMap { log -> (date: Date, spendUSD: Decimal, usage: LogTokenUsage?)? in
@@ -202,6 +241,52 @@ private struct LogsPayload: Decodable {
     let stats: BifrostStats?
 }
 
+private struct BifrostQuotaPayload: Decodable {
+    let virtualKeyName: String?
+    let budgets: [BifrostBudget]
+
+    enum CodingKeys: String, CodingKey {
+        case virtualKeyName = "virtual_key_name"
+        case budgets
+    }
+}
+
+private struct BifrostVirtualKeysPayload: Decodable {
+    let virtualKeys: [BifrostVirtualKey]
+
+    enum CodingKeys: String, CodingKey {
+        case virtualKeys = "virtual_keys"
+    }
+}
+
+private struct BifrostVirtualKey: Decodable {
+    let id: String?
+    let name: String?
+    let createdAt: Date?
+    let budgets: [BifrostBudget]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case createdAt = "created_at"
+        case budgets
+    }
+}
+
+private struct BifrostBudget: Decodable {
+    let maxLimit: Decimal?
+    let lastReset: Date?
+    let currentUsage: Decimal?
+    let virtualKeyID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case maxLimit = "max_limit"
+        case lastReset = "last_reset"
+        case currentUsage = "current_usage"
+        case virtualKeyID = "virtual_key_id"
+    }
+}
+
 private struct LogEntry: Decodable {
     let timestamp: Date?
     let cost: Decimal?
@@ -253,6 +338,16 @@ private extension JSONDecoder {
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid RFC3339 date")
         }
         return decoder
+    }
+}
+
+private extension Array where Element == BifrostBudget {
+    func reduceOptionalDecimal(_ keyPath: KeyPath<BifrostBudget, Decimal?>) -> Decimal? {
+        let values = compactMap { $0[keyPath: keyPath] }
+        guard !values.isEmpty else {
+            return nil
+        }
+        return values.reduce(Decimal(0), +)
     }
 }
 

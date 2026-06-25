@@ -1,0 +1,13 @@
+{
+  "virtual_key_name": "Claude Code Bifrost",
+  "is_active": true,
+  "budgets": [
+    {
+      "id": "budget-1",
+      "max_limit": 80,
+      "last_reset": "2026-05-01T00:00:00Z",
+      "current_usage": 12.5,
+      "virtual_key_id": "vk-current"
+    }
+  ]
+}
