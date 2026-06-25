@@ -1,0 +1,53 @@
+{
+  "overview": {
+    "stats": {
+      "total_cost": 12.75,
+      "total_tokens": 3750,
+      "total_requests": 9
+    },
+    "cost": {
+      "buckets": [
+        {
+          "timestamp": "2026-05-18T00:00:00Z",
+          "total_cost": 7.25
+        },
+        {
+          "timestamp": "2026-05-19T00:00:00Z",
+          "total_cost": 5.5
+        }
+      ]
+    },
+    "tokens": {
+      "buckets": [
+        {
+          "timestamp": "2026-05-18T00:00:00Z",
+          "prompt_tokens": 1000,
+          "completion_tokens": 500,
+          "total_tokens": 1500
+        },
+        {
+          "timestamp": "2026-05-19T00:00:00Z",
+          "prompt_tokens": 1500,
+          "completion_tokens": 750,
+          "total_tokens": 2250
+        }
+      ]
+    },
+    "requests": {
+      "buckets": [
+        {
+          "timestamp": "2026-05-18T00:00:00Z",
+          "count": 4,
+          "success": 3,
+          "error": 1
+        },
+        {
+          "timestamp": "2026-05-19T00:00:00Z",
+          "count": 5,
+          "success": 5,
+          "error": 0
+        }
+      ]
+    }
+  }
+}

@@ -31,6 +31,39 @@ final class StubURLLoader: URLLoading, @unchecked Sendable {
     }
 }
 
+final class SequenceURLLoader: URLLoading, @unchecked Sendable {
+    struct Response {
+        let data: Data
+        let statusCode: Int
+        let error: Error?
+
+        init(data: Data = Data(), statusCode: Int = 200, error: Error? = nil) {
+            self.data = data
+            self.statusCode = statusCode
+            self.error = error
+        }
+    }
+
+    var requests: [URLRequest] = []
+    private var responses: [Response]
+
+    init(responses: [Response]) {
+        self.responses = responses
+    }
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        requests.append(request)
+        let response = responses.isEmpty ? Response() : responses.removeFirst()
+        if let error = response.error {
+            throw error
+        }
+        return (
+            response.data,
+            HTTPURLResponse(url: request.url!, statusCode: response.statusCode, httpVersion: nil, headerFields: nil)!
+        )
+    }
+}
+
 final class CapturingLogger: AppLogging, @unchecked Sendable {
     var events: [AppLogEvent] = []
 
@@ -926,6 +959,207 @@ func testLiteLLMGatewayAdapterMapsKeyContextEndpoints() async throws {
 
     try expectEqual(try await client.fetchCurrentKeyContext(userContext: userContext), currentKey, "LiteLLM gateway adapter should forward current key requests")
     try expectEqual(try await client.fetchOwnedKeyContexts(userContext: userContext), [ownedKey], "LiteLLM gateway adapter should forward owned key requests")
+}
+
+func testBifrostDashboardDecodesTotalsAndDailyCostBuckets() throws {
+    let analytics = try BifrostResponseDecoder.decodeDashboard(from: fixtureData("bifrost-dashboard.json"), calendar: fixedCalendar())
+
+    try expectEqual(analytics.totalSpendUSD, Decimal(string: "12.75")!, "dashboard stats should expose total spend")
+    try expectEqual(analytics.dailyPoints.count, 2, "dashboard cost buckets should map to daily activity points")
+    try expectEqual(analytics.dailyPoints[0].date, try fixedDate("2026-05-18"), "first cost bucket date should decode from RFC3339 timestamp")
+    try expectEqual(analytics.dailyPoints[0].spendUSD, Decimal(string: "7.25")!, "first cost bucket should preserve spend")
+    try expectEqual(analytics.dailyPoints[1].spendUSD, Decimal(string: "5.5")!, "second cost bucket should preserve spend")
+    try expectEqual(analytics.source, .userDailyActivity, "dashboard data should be treated as the primary analytics source")
+}
+
+func testBifrostDashboardDecodesTokenUsageTotals() throws {
+    let analytics = try BifrostResponseDecoder.decodeDashboard(from: fixtureData("bifrost-dashboard.json"), calendar: fixedCalendar())
+
+    try expectEqual(analytics.totals.totalTokens, 3750, "dashboard stats should expose total tokens")
+    try expectEqual(analytics.totals.apiRequests, 9, "dashboard stats should expose total request count")
+    try expectEqual(analytics.totals.successfulRequests, 8, "dashboard stats should expose successful request count")
+    try expectEqual(analytics.totals.failedRequests, 1, "dashboard stats should expose failed request count")
+    try expectEqual(analytics.dailyPoints[0].totals.promptTokens, 1000, "token buckets should map prompt tokens onto matching days")
+    try expectEqual(analytics.dailyPoints[0].totals.completionTokens, 500, "token buckets should map completion tokens onto matching days")
+    try expectEqual(analytics.dailyPoints[0].totals.totalTokens, 1500, "token buckets should map total tokens onto matching days")
+    try expectEqual(analytics.dailyPoints[0].totals.apiRequests, 4, "request buckets should map request counts onto matching days")
+    try expectEqual(analytics.dailyPoints[0].totals.successfulRequests, 3, "request buckets should map successful request counts onto matching days")
+    try expectEqual(analytics.dailyPoints[0].totals.failedRequests, 1, "request buckets should map failed request counts onto matching days")
+}
+
+func testBifrostDashboardSkipsMalformedBucketsWithoutDroppingTotals() throws {
+    let payload = """
+    {
+      "overview": {
+        "stats": {
+          "total_cost": 19.5,
+          "total_tokens": 200,
+          "total_requests": 2
+        },
+        "cost": {
+          "buckets": [
+            { "timestamp": "2026-05-18T00:00:00Z", "total_cost": 7.5 },
+            { "timestamp": "2026-05-19T00:00:00Z" }
+          ]
+        }
+      }
+    }
+    """
+
+    let analytics = try BifrostResponseDecoder.decodeDashboard(from: Data(payload.utf8), calendar: fixedCalendar())
+
+    try expectEqual(analytics.totalSpendUSD, Decimal(string: "19.5")!, "malformed buckets should not drop dashboard totals")
+    try expectEqual(analytics.dailyPoints.count, 1, "cost buckets missing spend should be skipped")
+    try expectEqual(analytics.dailyPoints[0].spendUSD, Decimal(string: "7.5")!, "valid bucket should still decode")
+}
+
+func testBifrostLogsDecodesRowCostAndTokenUsage() throws {
+    let rows = try BifrostResponseDecoder.decodeLogsRows(from: fixtureData("bifrost-logs.json"))
+    let analytics = try BifrostResponseDecoder.decodeLogsAnalytics(from: fixtureData("bifrost-logs.json"), calendar: fixedCalendar())
+
+    try expectEqual(rows.count, 2, "logs fallback should decode row-level entries")
+    try expectEqual(rows[0].date, try fixedDate("2026-05-18").addingTimeInterval(10 * 3600 + 15 * 60 + 30), "log row timestamp should decode")
+    try expectEqual(rows[0].spendUSD, Decimal(string: "1.25")!, "log row cost should decode")
+    try expectEqual(analytics.dailyPoints[0].totals.promptTokens, 300, "fallback analytics should aggregate prompt tokens")
+    try expectEqual(analytics.dailyPoints[0].totals.completionTokens, 150, "fallback analytics should aggregate completion tokens")
+    try expectEqual(analytics.dailyPoints[0].totals.totalTokens, 450, "fallback analytics should aggregate total tokens")
+}
+
+func testBifrostLogsDecodesStatsTotals() throws {
+    let analytics = try BifrostResponseDecoder.decodeLogsAnalytics(from: fixtureData("bifrost-logs.json"), calendar: fixedCalendar())
+
+    try expectEqual(analytics.totalSpendUSD, 4, "logs stats should expose aggregate spend")
+    try expectEqual(analytics.totals.totalTokens, 450, "logs stats should expose aggregate tokens")
+    try expectEqual(analytics.totals.apiRequests, 2, "logs stats should expose aggregate requests")
+    try expectEqual(analytics.totals.successfulRequests, 2, "logs stats should expose successful requests")
+    try expectEqual(analytics.totals.failedRequests, 0, "logs stats should expose failed requests")
+    try expectEqual(analytics.source, .spendLogsFallback, "logs analytics should be marked as fallback source")
+}
+
+func testBifrostLogsRequestUsesRFC3339StartAndEndTime() async throws {
+    let loader = StubURLLoader(data: try fixtureData("bifrost-logs.json"))
+    let client = BifrostClient(baseURL: URL(string: "https://bifrost.example.internal")!, apiKey: "secret-token", loader: loader)
+
+    _ = try await client.fetchSpendRows(range: try utcDateRange(), userContext: nil)
+
+    let components = URLComponents(url: loader.requests.first!.url!, resolvingAgainstBaseURL: false)
+    let query = Dictionary(uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+    try expectEqual(loader.requests.first?.url?.path, "/api/logs", "logs request path should be correct")
+    try expectEqual(query["start_time"], "2026-05-18T00:00:00Z", "start_time should use RFC3339")
+    try expectEqual(query["end_time"], "2026-05-19T00:00:00Z", "end_time should use RFC3339")
+    try expectEqual(query["limit"], "1000", "logs fallback should request a bounded page size")
+    try expectEqual(query["sort_by"], "timestamp", "logs fallback should request stable timestamp ordering")
+    try expectEqual(query["order"], "asc", "logs fallback should request ascending rows for daily aggregation")
+    try expectEqual(loader.requests.first?.value(forHTTPHeaderField: "Authorization"), "Bearer secret-token", "Bifrost requests should use existing bearer credential scheme")
+}
+
+func testRefreshUsesBifrostAdapterWhenGatewayProviderIsBifrost() async throws {
+    let loader = SequenceURLLoader(responses: [
+        .init(data: try fixtureData("bifrost-dashboard.json"))
+    ])
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://bifrost.example.internal")!, spendLimitUSD: 80, gatewayProvider: .bifrost)),
+        gatewayClientFactory: { provider, baseURL, apiKey in
+            try! expectEqual(provider, .bifrost, "service should request the configured Bifrost provider")
+            return BifrostClient(baseURL: baseURL, apiKey: apiKey, loader: loader)
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "Bifrost dashboard refresh should succeed")
+    }
+    try expectEqual(snapshot.totalSpendUSD, Decimal(string: "12.75")!, "Bifrost dashboard spend should populate snapshot")
+    try expectEqual(snapshot.analytics?.totals.totalTokens, 3750, "Bifrost dashboard token totals should populate analytics")
+    try expectEqual(loader.requests.map { $0.url?.path }, ["/api/logs/dashboard"], "Bifrost refresh should call dashboard endpoint")
+}
+
+func testBifrostPrimaryFailureFallsBackToLogs() async throws {
+    let loader = SequenceURLLoader(responses: [
+        .init(data: Data(#"{"error":"dashboard unavailable"}"#.utf8), statusCode: 500),
+        .init(data: try fixtureData("bifrost-logs.json"))
+    ])
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://bifrost.example.internal")!, spendLimitUSD: 80, gatewayProvider: .bifrost)),
+        gatewayClientFactory: { _, baseURL, apiKey in
+            BifrostClient(baseURL: baseURL, apiKey: apiKey, loader: loader)
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "Bifrost logs fallback should refresh snapshot")
+    }
+    try expectEqual(snapshot.totalSpendUSD, 4, "Bifrost logs fallback should sum row spend")
+    try expectEqual(snapshot.analytics?.source, .spendLogsFallback, "Bifrost fallback should mark analytics source")
+    try expectEqual(snapshot.analytics?.totals.totalTokens, 450, "Bifrost logs fallback should preserve aggregate token totals")
+    try expectEqual(snapshot.analytics?.dailyPoints.first?.totals.promptTokens, 300, "Bifrost logs fallback should preserve row token usage")
+    try expectEqual(loader.requests.map { $0.url?.path }, ["/api/logs/dashboard", "/api/logs"], "Bifrost should fall back from dashboard to logs")
+}
+
+func testBifrostFallbackFailureReturnsStaleSnapshotWhenAvailable() async throws {
+    let loader = SequenceURLLoader(responses: [
+        .init(data: try fixtureData("bifrost-dashboard.json")),
+        .init(data: Data(#"{"error":"dashboard unavailable"}"#.utf8), statusCode: 500),
+        .init(data: Data(#"{"error":"logs unavailable"}"#.utf8), statusCode: 500)
+    ])
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://bifrost.example.internal")!, spendLimitUSD: 80, gatewayProvider: .bifrost)),
+        gatewayClientFactory: { _, baseURL, apiKey in
+            BifrostClient(baseURL: baseURL, apiKey: apiKey, loader: loader)
+        }
+    )
+
+    _ = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18").addingTimeInterval(60), calendar: fixedCalendar())
+
+    guard case let .stale(snapshot, message) = result else {
+        throw TestFailure(description: "Bifrost double failure should return stale snapshot")
+    }
+    try expectEqual(snapshot.totalSpendUSD, Decimal(string: "12.75")!, "stale snapshot should preserve previous Bifrost spend")
+    try expect(snapshot.isStale, "stale snapshot should be marked stale")
+    try expectEqual(message, "Showing last known spend", "stale message should match existing behavior")
+}
+
+func testBifrostLogsIncludeProviderEndpointAndCorrelationIDWithoutSecrets() async throws {
+    let logger = CapturingLogger()
+    let loader = StubURLLoader(data: try fixtureData("bifrost-dashboard.json"))
+    let client = BifrostClient(baseURL: URL(string: "https://bifrost.example.internal")!, apiKey: "secret-token", loader: loader, logger: logger)
+
+    _ = try await client.fetchSpendAnalytics(range: try utcDateRange(), userContext: nil)
+
+    let event = try logger.events.first.unwrap("Bifrost gateway log event")
+    try expectEqual(event.gatewayProvider, .bifrost, "Bifrost logs should include provider")
+    try expectEqual(event.endpoint, "/api/logs/dashboard", "Bifrost logs should include endpoint")
+    try expect(!event.correlationID.isEmpty, "Bifrost logs should include correlation id")
+    try expect(!String(describing: logger.events).contains("secret-token"), "Bifrost logs should not contain API keys")
+    try expect(!String(describing: logger.events).contains("Bearer"), "Bifrost logs should not contain authorization headers")
+}
+
+func testBifrostFallbackEmitsFallbackSourceSignal() async throws {
+    let loader = SequenceURLLoader(responses: [
+        .init(data: Data(#"{"error":"dashboard unavailable"}"#.utf8), statusCode: 500),
+        .init(data: try fixtureData("bifrost-logs.json"))
+    ])
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://bifrost.example.internal")!, spendLimitUSD: 80, gatewayProvider: .bifrost)),
+        gatewayClientFactory: { _, baseURL, apiKey in
+            BifrostClient(baseURL: baseURL, apiKey: apiKey, loader: loader)
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "Bifrost logs fallback should refresh snapshot")
+    }
+    try expectEqual(snapshot.analytics?.source, .spendLogsFallback, "Bifrost fallback should emit fallback source signal")
 }
 
 func testReleaseUpdateCheckerDetectsNewerRelease() async throws {
@@ -3903,7 +4137,12 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testRefreshMenuActionIsDisabledWhileRefreshIsRunning", testRefreshMenuActionIsDisabledWhileRefreshIsRunning),
     ("testHandlePrimaryClickUsesPopoverTogglePath", testHandlePrimaryClickUsesPopoverTogglePath),
     ("testHandleSecondaryClickUsesContextMenuPath", testHandleSecondaryClickUsesContextMenuPath),
-    ("testHandleSecondaryClickDisablesRefreshInBuiltMenuWhileRefreshIsRunning", testHandleSecondaryClickDisablesRefreshInBuiltMenuWhileRefreshIsRunning)
+    ("testHandleSecondaryClickDisablesRefreshInBuiltMenuWhileRefreshIsRunning", testHandleSecondaryClickDisablesRefreshInBuiltMenuWhileRefreshIsRunning),
+    ("testBifrostDashboardDecodesTotalsAndDailyCostBuckets", testBifrostDashboardDecodesTotalsAndDailyCostBuckets),
+    ("testBifrostDashboardDecodesTokenUsageTotals", testBifrostDashboardDecodesTokenUsageTotals),
+    ("testBifrostDashboardSkipsMalformedBucketsWithoutDroppingTotals", testBifrostDashboardSkipsMalformedBucketsWithoutDroppingTotals),
+    ("testBifrostLogsDecodesRowCostAndTokenUsage", testBifrostLogsDecodesRowCostAndTokenUsage),
+    ("testBifrostLogsDecodesStatsTotals", testBifrostLogsDecodesStatsTotals)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [
@@ -3922,6 +4161,12 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testLiteLLMGatewayAdapterMapsUserContext", testLiteLLMGatewayAdapterMapsUserContext),
     ("testLiteLLMGatewayAdapterMapsSpendAnalyticsAndFallbackRows", testLiteLLMGatewayAdapterMapsSpendAnalyticsAndFallbackRows),
     ("testLiteLLMGatewayAdapterMapsKeyContextEndpoints", testLiteLLMGatewayAdapterMapsKeyContextEndpoints),
+    ("testBifrostLogsRequestUsesRFC3339StartAndEndTime", testBifrostLogsRequestUsesRFC3339StartAndEndTime),
+    ("testRefreshUsesBifrostAdapterWhenGatewayProviderIsBifrost", testRefreshUsesBifrostAdapterWhenGatewayProviderIsBifrost),
+    ("testBifrostPrimaryFailureFallsBackToLogs", testBifrostPrimaryFailureFallsBackToLogs),
+    ("testBifrostFallbackFailureReturnsStaleSnapshotWhenAvailable", testBifrostFallbackFailureReturnsStaleSnapshotWhenAvailable),
+    ("testBifrostLogsIncludeProviderEndpointAndCorrelationIDWithoutSecrets", testBifrostLogsIncludeProviderEndpointAndCorrelationIDWithoutSecrets),
+    ("testBifrostFallbackEmitsFallbackSourceSignal", testBifrostFallbackEmitsFallbackSourceSignal),
     ("testReleaseUpdateCheckerDetectsNewerRelease", testReleaseUpdateCheckerDetectsNewerRelease),
     ("testReleaseUpdateCheckerIgnoresSameVersion", testReleaseUpdateCheckerIgnoresSameVersion),
     ("testKeyEndpointsMapUnauthorizedWithoutBreakingSpend", testKeyEndpointsMapUnauthorizedWithoutBreakingSpend),

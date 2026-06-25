@@ -1,0 +1,35 @@
+{
+  "logs": [
+    {
+      "timestamp": "2026-05-18T10:15:30Z",
+      "cost": 1.25,
+      "token_usage": {
+        "prompt_tokens": 100,
+        "completion_tokens": 50,
+        "total_tokens": 150,
+        "cost": {
+          "total_cost": 1.25
+        }
+      }
+    },
+    {
+      "timestamp": "2026-05-18T11:45:00Z",
+      "cost": 2.75,
+      "token_usage": {
+        "prompt_tokens": 200,
+        "completion_tokens": 100,
+        "total_tokens": 300,
+        "cost": {
+          "total_cost": 2.75
+        }
+      }
+    }
+  ],
+  "stats": {
+    "total_cost": 4,
+    "total_tokens": 450,
+    "total_requests": 2,
+    "successful_requests": 2,
+    "failed_requests": 0
+  }
+}

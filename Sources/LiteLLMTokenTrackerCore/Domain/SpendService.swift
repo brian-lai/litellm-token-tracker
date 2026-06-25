@@ -47,9 +47,7 @@ public struct SpendService: SpendServicing {
             currentScope = scope
             let client = clientFactory(configuration.gatewayProvider, baseURL, apiKey)
             let gatewayUser = try await client.fetchCurrentUserContext()
-            guard let user = gatewayUser.liteLLMUserContext else {
-                throw GatewayClientError.malformedResponse
-            }
+            let user = gatewayUser.liteLLMUserContext
             let dateRange = rangeResolver.dateRange(for: range, now: now, calendar: calendar)
             let rangeBudgetUSD = budgetForRange(
                 dailyBudgetUSD: configuration.spendLimitUSD,
@@ -67,32 +65,12 @@ public struct SpendService: SpendServicing {
                     userContext: user
                 )
             } catch {
-                let rows = try await client.fetchSpendRows(range: dateRange, userContext: gatewayUser)
-                let fallbackSnapshot = SpendAggregator.snapshot(
-                    rows: rows,
-                    range: range,
-                    dateRange: dateRange,
-                    limitUSD: rangeBudgetUSD,
-                    refreshedAt: now
-                )
-                let analytics = SpendAnalyticsSummary(
-                    totalSpendUSD: fallbackSnapshot.totalSpendUSD,
-                    totals: .zero,
-                    dailyPoints: fallbackSnapshot.dailyPoints.map {
-                        DailyActivityPoint(date: $0.date, spendUSD: $0.spendUSD, totals: .zero)
-                    },
-                    breakdowns: [:],
-                    source: .spendLogsFallback
-                )
-                snapshot = SpendSnapshot(
-                    range: fallbackSnapshot.range,
-                    totalSpendUSD: fallbackSnapshot.totalSpendUSD,
-                    limitUSD: fallbackSnapshot.limitUSD,
-                    percentOfLimit: fallbackSnapshot.percentOfLimit,
-                    dailyPoints: fallbackSnapshot.dailyPoints,
-                    refreshedAt: fallbackSnapshot.refreshedAt,
-                    isStale: fallbackSnapshot.isStale,
+                let analytics = try await client.fetchFallbackSpendAnalytics(range: dateRange, userContext: gatewayUser)
+                snapshot = SpendAggregator.snapshot(
                     analytics: analytics,
+                    range: range,
+                    limitUSD: rangeBudgetUSD,
+                    refreshedAt: now,
                     userContext: user
                 )
             }
