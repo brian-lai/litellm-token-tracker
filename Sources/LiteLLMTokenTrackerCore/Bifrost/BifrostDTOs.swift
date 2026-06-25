@@ -80,15 +80,16 @@ public enum BifrostResponseDecoder {
         } catch {
             throw GatewayClientError.malformedResponse
         }
-        guard payload.virtualKeyName != nil || !payload.budgets.isEmpty else {
+        let budgets = payload.budgets ?? []
+        guard payload.virtualKeyName != nil || !budgets.isEmpty else {
             throw GatewayClientError.malformedResponse
         }
         return KeySpendSummary(
             alias: payload.virtualKeyName,
-            name: payload.budgets.first?.virtualKeyID,
-            spendUSD: payload.budgets.reduce(Decimal(0)) { $0 + ($1.currentUsage ?? 0) },
-            maxBudgetUSD: payload.budgets.reduceOptionalDecimal(\.maxLimit),
-            budgetResetAt: payload.budgets.compactMap(\.lastReset).min(),
+            name: budgets.first?.virtualKeyID,
+            spendUSD: budgets.reduce(Decimal(0)) { $0 + ($1.currentUsage ?? 0) },
+            maxBudgetUSD: budgets.reduceOptionalDecimal(\.maxLimit),
+            budgetResetAt: budgets.compactMap(\.lastReset).min(),
             lastActiveAt: nil
         )
     }
@@ -243,7 +244,7 @@ private struct LogsPayload: Decodable {
 
 private struct BifrostQuotaPayload: Decodable {
     let virtualKeyName: String?
-    let budgets: [BifrostBudget]
+    let budgets: [BifrostBudget]?
 
     enum CodingKeys: String, CodingKey {
         case virtualKeyName = "virtual_key_name"

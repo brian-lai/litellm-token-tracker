@@ -85,7 +85,10 @@ public struct BifrostClient: GatewayClientProtocol {
     }
 
     public func makeQuotaRequest() throws -> URLRequest {
-        try request(from: components(path: "/api/governance/virtual-keys/quota"))
+        var request = try request(from: components(path: "/api/governance/virtual-keys/quota"))
+        request.setValue(nil, forHTTPHeaderField: "Authorization")
+        request.setValue(apiKey, forHTTPHeaderField: "x-bf-vk")
+        return request
     }
 
     public func makeVirtualKeysRequest() throws -> URLRequest {

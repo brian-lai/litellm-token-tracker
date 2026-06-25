@@ -1178,6 +1178,22 @@ func testBifrostQuotaDecodesBudgetResetAndUsage() throws {
     try expectEqual(key.lastActiveAt, nil, "quota endpoint does not expose last active time")
 }
 
+func testBifrostQuotaDecodesNullableBudgetsAsCurrentKeyWithoutBudget() throws {
+    let payload = """
+    {
+      "virtual_key_name": "Budgetless Bifrost Key",
+      "is_active": true,
+      "budgets": null
+    }
+    """
+
+    let key = try BifrostResponseDecoder.decodeQuota(from: Data(payload.utf8))
+
+    try expectEqual(key.displayName, "Budgetless Bifrost Key", "quota should preserve key name when budgets are null")
+    try expectEqual(key.spendUSD, 0, "nullable budgets should decode as zero spend")
+    try expectEqual(key.maxBudgetUSD, nil, "nullable budgets should decode without max budget")
+}
+
 func testBifrostQuotaMalformedResponseMapsToMalformedError() throws {
     do {
         _ = try BifrostResponseDecoder.decodeQuota(from: Data(#"{"budgets":[]}"#.utf8))
@@ -1194,6 +1210,28 @@ func testBifrostOwnedKeysSuccessMapsVirtualKeyRows() throws {
     try expectEqual(keys[0].alias, "Large key", "owned key name should map to alias")
     try expectEqual(keys[0].spendUSD, 25, "owned key current usage should map to spend")
     try expectEqual(keys[0].maxBudgetUSD, 100, "owned key max limit should map to budget")
+}
+
+func testBifrostQuotaRequestUsesVirtualKeyHeader() async throws {
+    let loader = StubURLLoader(data: try fixtureData("bifrost-quota.json"))
+    let client = BifrostClient(baseURL: URL(string: "https://bifrost.example.internal")!, apiKey: "secret-token", loader: loader)
+
+    _ = try await client.fetchCurrentKeyContext(userContext: nil)
+
+    try expectEqual(loader.requests.first?.url?.path, "/api/governance/virtual-keys/quota", "quota request path should be correct")
+    try expectEqual(loader.requests.first?.value(forHTTPHeaderField: "x-bf-vk"), "secret-token", "quota request should use Bifrost virtual-key header")
+    try expectEqual(loader.requests.first?.value(forHTTPHeaderField: "Authorization"), nil, "quota request should not use management Authorization header")
+}
+
+func testBifrostOwnedKeysRequestUsesManagementBearerHeader() async throws {
+    let loader = StubURLLoader(data: try fixtureData("bifrost-virtual-keys.json"))
+    let client = BifrostClient(baseURL: URL(string: "https://bifrost.example.internal")!, apiKey: "secret-token", loader: loader)
+
+    _ = try await client.fetchOwnedKeyContexts(userContext: nil)
+
+    try expectEqual(loader.requests.first?.url?.path, "/api/governance/virtual-keys", "owned keys request path should be correct")
+    try expectEqual(loader.requests.first?.value(forHTTPHeaderField: "Authorization"), "Bearer secret-token", "owned keys request should use management bearer header")
+    try expectEqual(loader.requests.first?.value(forHTTPHeaderField: "x-bf-vk"), nil, "owned keys request should not use virtual-key quota header")
 }
 
 func testBifrostOwnedKeysUnauthorizedReturnsEmptyOwnedKeysWithScopedMessage() async throws {
@@ -4346,6 +4384,7 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testBifrostLogsDecodesStatsTotals", testBifrostLogsDecodesStatsTotals),
     ("testBifrostQuotaDecodesCurrentKeyBudgetContext", testBifrostQuotaDecodesCurrentKeyBudgetContext),
     ("testBifrostQuotaDecodesBudgetResetAndUsage", testBifrostQuotaDecodesBudgetResetAndUsage),
+    ("testBifrostQuotaDecodesNullableBudgetsAsCurrentKeyWithoutBudget", testBifrostQuotaDecodesNullableBudgetsAsCurrentKeyWithoutBudget),
     ("testBifrostQuotaMalformedResponseMapsToMalformedError", testBifrostQuotaMalformedResponseMapsToMalformedError),
     ("testBifrostOwnedKeysSuccessMapsVirtualKeyRows", testBifrostOwnedKeysSuccessMapsVirtualKeyRows)
 ]
@@ -4372,6 +4411,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testBifrostFallbackFailureReturnsStaleSnapshotWhenAvailable", testBifrostFallbackFailureReturnsStaleSnapshotWhenAvailable),
     ("testBifrostLogsIncludeProviderEndpointAndCorrelationIDWithoutSecrets", testBifrostLogsIncludeProviderEndpointAndCorrelationIDWithoutSecrets),
     ("testBifrostFallbackEmitsFallbackSourceSignal", testBifrostFallbackEmitsFallbackSourceSignal),
+    ("testBifrostQuotaRequestUsesVirtualKeyHeader", testBifrostQuotaRequestUsesVirtualKeyHeader),
+    ("testBifrostOwnedKeysRequestUsesManagementBearerHeader", testBifrostOwnedKeysRequestUsesManagementBearerHeader),
     ("testBifrostOwnedKeysUnauthorizedReturnsEmptyOwnedKeysWithScopedMessage", testBifrostOwnedKeysUnauthorizedReturnsEmptyOwnedKeysWithScopedMessage),
     ("testBifrostOwnedKeysForbiddenKeepsCurrentKeyVisible", testBifrostOwnedKeysForbiddenKeepsCurrentKeyVisible),
     ("testBifrostOwnedKeysInsufficientScopeKeepsCurrentKeyVisibleWithScopedMessage", testBifrostOwnedKeysInsufficientScopeKeepsCurrentKeyVisibleWithScopedMessage),
