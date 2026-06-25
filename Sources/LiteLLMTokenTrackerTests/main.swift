@@ -1260,6 +1260,61 @@ func testBifrostOwnedKeysInsufficientScopeKeepsCurrentKeyVisibleWithScopedMessag
     try expectEqual(snapshot.ownedKeysUnavailableMessage, "Bifrost owned keys require management API scope", "insufficient scope should show scoped owned-key message")
 }
 
+func testDualGatewaySelectionAcceptancePath() async throws {
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80, gatewayProvider: .litellm))
+    let apiKeyStore = FakeAPIKeyStore(result: .success("secret-token"))
+    let bifrostLoader = SequenceURLLoader(responses: [
+        .init(data: try fixtureData("bifrost-dashboard.json")),
+        .init(data: try fixtureData("bifrost-quota.json")),
+        .init(data: try fixtureData("bifrost-virtual-keys.json"))
+    ])
+    let liteLLMClient = FakeClient(
+        userResult: .success(LiteLLMUserContext(userID: "user-123", email: nil, totalSpendUSD: 12, maxBudgetUSD: 80, budgetResetAt: nil)),
+        activityResult: .success(analyticsSummary(totalSpendUSD: 12, dailyPoints: [DailySpendPoint(date: try fixedDate("2026-05-18"), spendUSD: 12)])),
+        rowsResult: .success([]),
+        currentKeyResult: .success(keySummary(alias: "LiteLLM current", spend: 3)),
+        userKeysResult: .success([keySummary(alias: "LiteLLM owned", spend: 2)])
+    )
+    let factory: @Sendable (GatewayProvider, URL, String) -> GatewayClientProtocol = { provider, baseURL, apiKey in
+        switch provider {
+        case .litellm:
+            return liteLLMClient
+        case .bifrost:
+            return BifrostClient(baseURL: baseURL, apiKey: apiKey, loader: bifrostLoader)
+        }
+    }
+    let spendService = SpendService(apiKeyStore: apiKeyStore, configurationStore: configurationStore, gatewayClientFactory: factory)
+    let keyService = KeyContextService(apiKeyStore: apiKeyStore, configurationStore: configurationStore, gatewayClientFactory: factory)
+
+    let liteLLMSpend = await spendService.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    let liteLLMKeys = await keyService.refresh(userContext: nil, now: try fixedDate("2026-05-18"), bypassingCache: true)
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://bifrost.example.internal")!, spendLimitUSD: 80, gatewayProvider: .bifrost))
+    let bifrostSpend = await spendService.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+    let bifrostKeys = await keyService.refresh(userContext: nil, now: try fixedDate("2026-05-18"), bypassingCache: true)
+
+    guard case let .refreshed(liteLLMSnapshot) = liteLLMSpend else {
+        throw TestFailure(description: "LiteLLM spend should refresh")
+    }
+    guard case let .refreshed(liteLLMKeySnapshot) = liteLLMKeys else {
+        throw TestFailure(description: "LiteLLM keys should refresh")
+    }
+    guard case let .refreshed(bifrostSnapshot) = bifrostSpend else {
+        throw TestFailure(description: "Bifrost spend should refresh")
+    }
+    guard case let .refreshed(bifrostKeySnapshot) = bifrostKeys else {
+        throw TestFailure(description: "Bifrost keys should refresh")
+    }
+    try expectEqual(liteLLMSnapshot.totalSpendUSD, 12, "LiteLLM selection should use LiteLLM analytics")
+    try expectEqual(liteLLMKeySnapshot.currentKey?.displayName, "LiteLLM current", "LiteLLM selection should use LiteLLM key context")
+    try expectEqual(bifrostSnapshot.totalSpendUSD, Decimal(string: "12.75")!, "Bifrost selection should use Bifrost dashboard")
+    try expectEqual(bifrostKeySnapshot.currentKey?.displayName, "Claude Code Bifrost", "Bifrost selection should use Bifrost quota")
+    try expectEqual(bifrostLoader.requests.map { $0.url?.path }, ["/api/logs/dashboard", "/api/governance/virtual-keys/quota", "/api/governance/virtual-keys"], "Bifrost selection should call Bifrost spend and key endpoints")
+}
+
 func testReleaseUpdateCheckerDetectsNewerRelease() async throws {
     let payload = """
     {
@@ -3933,6 +3988,53 @@ func testSettingsModeShowsGatewayProvider() throws {
     try expectEqual(rows["Gateway"], "Bifrost", "settings diagnostics should show the selected gateway provider")
 }
 
+func testSettingsDiagnosticsShowsSelectedGatewayProvider() throws {
+    let presentation = SettingsPresentation.make(baseURLText: "https://bifrost.example.internal", spendLimitText: "80", gatewayProvider: .bifrost, snapshot: nil, settingsError: nil)
+    let rows = Dictionary(uniqueKeysWithValues: presentation.diagnosticRows.map { ($0.label, $0.value) })
+
+    try expectEqual(rows["Gateway"], "Bifrost", "diagnostics should reflect selected gateway provider")
+}
+
+@MainActor
+func testBifrostSetupErrorMessagesReferenceSelectedProvider() async throws {
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: nil, spendLimitUSD: 80, gatewayProvider: .bifrost))
+    let viewModel = SpendDashboardViewModel(
+        spendService: RecordingSpendService(results: []),
+        apiKeyStore: FakeAPIKeyStore(result: .failure(APIKeyStoreError.missingKey)),
+        configurationStore: configurationStore
+    )
+
+    try expectEqual(viewModel.errorMessage, "Bifrost base URL is missing", "Bifrost setup errors should reference selected provider")
+}
+
+@MainActor
+func testSwitchingGatewayClearsVisibleKeyContextAndDiagnosticsSource() async throws {
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80, gatewayProvider: .litellm))
+    let snapshot = KeyContextSnapshot(currentKey: keySummary(alias: "old", spend: 1), ownedKeys: [], refreshedAt: try fixedDate("2026-05-18"), isStale: false)
+    let viewModel = SpendDashboardViewModel(
+        spendService: RecordingSpendService(results: []),
+        keyContextService: RecordingKeyContextService(results: [.refreshed(snapshot)]),
+        configurationStore: configurationStore
+    )
+    viewModel.currentAnalyticsSummary = analyticsSummary(totalSpendUSD: 40, dailyPoints: [], source: .userDailyActivity)
+    viewModel.keyContextSnapshot = snapshot
+
+    viewModel.gatewayProviderDraft = .bifrost
+    viewModel.baseURLDraft = "https://bifrost.example.internal"
+    viewModel.saveSettings()
+
+    try expectEqual(viewModel.keyContextSnapshot, nil, "switching gateway should clear visible key context")
+    try expectEqual(viewModel.currentAnalyticsSummary, nil, "switching gateway should clear diagnostics source")
+}
+
 @MainActor
 func testSettingsModeCanClearAPIKey() async throws {
     let store = MutableAPIKeyStore()
@@ -4205,6 +4307,7 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testSettingsModeShowsCredentialSourceWithoutSecretPathByDefault", testSettingsModeShowsCredentialSourceWithoutSecretPathByDefault),
     ("testSettingsModeShowsDataSource", testSettingsModeShowsDataSource),
     ("testSettingsModeShowsGatewayProvider", testSettingsModeShowsGatewayProvider),
+    ("testSettingsDiagnosticsShowsSelectedGatewayProvider", testSettingsDiagnosticsShowsSelectedGatewayProvider),
     ("testSettingsModeShowsBaseURL", testSettingsModeShowsBaseURL),
     ("testSettingsModeShowsUnconfiguredBaseURL", testSettingsModeShowsUnconfiguredBaseURL),
     ("testSettingsModeDocumentsLocalFileStoreRisk", testSettingsModeDocumentsLocalFileStoreRisk),
@@ -4272,6 +4375,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testBifrostOwnedKeysUnauthorizedReturnsEmptyOwnedKeysWithScopedMessage", testBifrostOwnedKeysUnauthorizedReturnsEmptyOwnedKeysWithScopedMessage),
     ("testBifrostOwnedKeysForbiddenKeepsCurrentKeyVisible", testBifrostOwnedKeysForbiddenKeepsCurrentKeyVisible),
     ("testBifrostOwnedKeysInsufficientScopeKeepsCurrentKeyVisibleWithScopedMessage", testBifrostOwnedKeysInsufficientScopeKeepsCurrentKeyVisibleWithScopedMessage),
+    ("testDualGatewaySelectionAcceptancePath", testDualGatewaySelectionAcceptancePath),
     ("testReleaseUpdateCheckerDetectsNewerRelease", testReleaseUpdateCheckerDetectsNewerRelease),
     ("testReleaseUpdateCheckerIgnoresSameVersion", testReleaseUpdateCheckerIgnoresSameVersion),
     ("testKeyEndpointsMapUnauthorizedWithoutBreakingSpend", testKeyEndpointsMapUnauthorizedWithoutBreakingSpend),
@@ -4312,6 +4416,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testSettingsModeShowsGatewaySelector", testSettingsModeShowsGatewaySelector),
     ("testChangingGatewayDraftDoesNotApplyUntilSave", testChangingGatewayDraftDoesNotApplyUntilSave),
     ("testSavingGatewayClearsEndpointScopedStateAndRequiresRefresh", testSavingGatewayClearsEndpointScopedStateAndRequiresRefresh),
+    ("testBifrostSetupErrorMessagesReferenceSelectedProvider", testBifrostSetupErrorMessagesReferenceSelectedProvider),
+    ("testSwitchingGatewayClearsVisibleKeyContextAndDiagnosticsSource", testSwitchingGatewayClearsVisibleKeyContextAndDiagnosticsSource),
     ("testChangingBaseURLClearsSpendSnapshots", testChangingBaseURLClearsSpendSnapshots),
     ("testChangingBaseURLPreservesSetupPauseState", testChangingBaseURLPreservesSetupPauseState),
     ("testAPIKeyChangeClearsSpendSnapshots", testAPIKeyChangeClearsSpendSnapshots),

@@ -238,16 +238,16 @@ public final class SpendDashboardViewModel {
 
     public func clearAPIKey() {
         guard let apiKeyStore else {
-            errorMessage = "Unable to clear LiteLLM API key"
+            errorMessage = "Unable to clear \(currentGatewayDisplayName()) API key"
             return
         }
         do {
             try apiKeyStore.deleteAPIKey()
             apiKeyDraft = ""
-            errorMessage = "LiteLLM API key is missing"
+            errorMessage = "\(currentGatewayDisplayName()) API key is missing"
             apiKeyDidChange()
         } catch {
-            errorMessage = "Unable to clear LiteLLM API key"
+            errorMessage = "Unable to clear \(currentGatewayDisplayName()) API key"
         }
     }
 
@@ -300,7 +300,7 @@ public final class SpendDashboardViewModel {
             return
         }
         guard let apiKeyStore else {
-            errorMessage = "Unable to save LiteLLM API key"
+            errorMessage = "Unable to save \(currentGatewayDisplayName()) API key"
             return
         }
         do {
@@ -309,7 +309,7 @@ public final class SpendDashboardViewModel {
             errorMessage = nil
             apiKeyDidChange()
         } catch {
-            errorMessage = "Unable to save LiteLLM API key"
+            errorMessage = "Unable to save \(currentGatewayDisplayName()) API key"
         }
     }
 
@@ -428,9 +428,16 @@ public final class SpendDashboardViewModel {
             return
         }
         if baseURLMissing {
-            errorMessage = "LiteLLM base URL is missing"
+            errorMessage = "\(currentGatewayDisplayName()) base URL is missing"
         } else if apiKeyMissing {
-            errorMessage = "LiteLLM API key is missing"
+            errorMessage = "\(currentGatewayDisplayName()) API key is missing"
         }
+    }
+
+    private func currentGatewayDisplayName() -> String {
+        if let configuration = try? configurationStore?.loadConfiguration() {
+            return configuration.gatewayProvider.displayName
+        }
+        return gatewayProviderDraft.displayName
     }
 }

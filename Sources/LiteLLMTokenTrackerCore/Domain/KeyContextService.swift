@@ -78,7 +78,7 @@ public final class KeyContextService: KeyContextServicing, @unchecked Sendable {
             let apiKey = try apiKeyStore.readAPIKey()
             let configuration = try configurationStore.loadConfiguration()
             guard let baseURL = configuration.baseURL else {
-                return .failed(message: "LiteLLM base URL is missing")
+                return .failed(message: "\(configuration.gatewayProvider.displayName) base URL is missing")
             }
             let scope = cacheScope(baseURL: baseURL, apiKey: apiKey, gatewayProvider: configuration.gatewayProvider)
             currentScope = scope
