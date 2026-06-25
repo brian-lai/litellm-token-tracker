@@ -59,6 +59,75 @@ public enum BifrostResponseDecoder {
             source: .userDailyActivity
         )
     }
+
+    public static func decodeLogsRows(from data: Data) throws -> [SpendLogSummaryRow] {
+        let payload = try decodeLogsPayload(from: data)
+        return payload.logs.compactMap { log in
+            guard let date = log.timestamp, let spendUSD = log.resolvedCost else {
+                return nil
+            }
+            return SpendLogSummaryRow(date: date, spendUSD: spendUSD)
+        }
+    }
+
+    public static func decodeLogsAnalytics(from data: Data, calendar: Calendar) throws -> SpendAnalyticsSummary {
+        let payload = try decodeLogsPayload(from: data)
+        let rows = payload.logs.compactMap { log -> (date: Date, spendUSD: Decimal, usage: LogTokenUsage?)? in
+            guard let date = log.timestamp, let spendUSD = log.resolvedCost else {
+                return nil
+            }
+            return (date, spendUSD, log.tokenUsage)
+        }
+
+        let groupedRows = Dictionary(grouping: rows) { row in
+            calendar.startOfDay(for: row.date)
+        }
+        let dailyPoints = groupedRows.map { date, rows in
+            let spend = rows.reduce(Decimal(0)) { partial, row in partial + row.spendUSD }
+            let promptTokens = rows.reduce(0) { partial, row in partial + (row.usage?.promptTokens ?? 0) }
+            let completionTokens = rows.reduce(0) { partial, row in partial + (row.usage?.completionTokens ?? 0) }
+            let totalTokens = rows.reduce(0) { partial, row in partial + (row.usage?.totalTokens ?? 0) }
+            return DailyActivityPoint(
+                date: date,
+                spendUSD: spend,
+                totals: SpendUsageTotals(
+                    totalTokens: totalTokens,
+                    promptTokens: promptTokens,
+                    completionTokens: completionTokens,
+                    cacheCreationTokens: 0,
+                    cacheReadTokens: 0,
+                    apiRequests: rows.count,
+                    successfulRequests: 0,
+                    failedRequests: 0
+                )
+            )
+        }.sorted { $0.date < $1.date }
+
+        return SpendAnalyticsSummary(
+            totalSpendUSD: payload.stats?.totalCost ?? rows.reduce(Decimal(0)) { $0 + $1.spendUSD },
+            totals: SpendUsageTotals(
+                totalTokens: payload.stats?.totalTokens ?? rows.reduce(0) { $0 + ($1.usage?.totalTokens ?? 0) },
+                promptTokens: rows.reduce(0) { $0 + ($1.usage?.promptTokens ?? 0) },
+                completionTokens: rows.reduce(0) { $0 + ($1.usage?.completionTokens ?? 0) },
+                cacheCreationTokens: 0,
+                cacheReadTokens: 0,
+                apiRequests: payload.stats?.totalRequests ?? rows.count,
+                successfulRequests: payload.stats?.successfulRequests ?? 0,
+                failedRequests: payload.stats?.failedRequests ?? 0
+            ),
+            dailyPoints: dailyPoints,
+            breakdowns: [:],
+            source: .spendLogsFallback
+        )
+    }
+
+    private static func decodeLogsPayload(from data: Data) throws -> LogsPayload {
+        do {
+            return try JSONDecoder.bifrost.decode(LogsPayload.self, from: data)
+        } catch {
+            throw GatewayClientError.malformedResponse
+        }
+    }
 }
 
 private struct DashboardPayload: Decodable {
@@ -129,6 +198,49 @@ private struct RequestBucket: Decodable {
     enum CodingKeys: String, CodingKey {
         case timestamp
         case totalRequests = "total_requests"
+    }
+}
+
+private struct LogsPayload: Decodable {
+    let logs: [LogEntry]
+    let stats: BifrostStats?
+}
+
+private struct LogEntry: Decodable {
+    let timestamp: Date?
+    let cost: Decimal?
+    let tokenUsage: LogTokenUsage?
+
+    var resolvedCost: Decimal? {
+        cost ?? tokenUsage?.cost?.totalCost
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case timestamp
+        case cost
+        case tokenUsage = "token_usage"
+    }
+}
+
+private struct LogTokenUsage: Decodable {
+    let promptTokens: Int?
+    let completionTokens: Int?
+    let totalTokens: Int?
+    let cost: LogTokenCost?
+
+    enum CodingKeys: String, CodingKey {
+        case promptTokens = "prompt_tokens"
+        case completionTokens = "completion_tokens"
+        case totalTokens = "total_tokens"
+        case cost
+    }
+}
+
+private struct LogTokenCost: Decodable {
+    let totalCost: Decimal?
+
+    enum CodingKeys: String, CodingKey {
+        case totalCost = "total_cost"
     }
 }
 

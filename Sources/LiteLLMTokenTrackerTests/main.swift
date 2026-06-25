@@ -978,6 +978,46 @@ func testBifrostDashboardSkipsMalformedBucketsWithoutDroppingTotals() throws {
     try expectEqual(analytics.dailyPoints[0].spendUSD, Decimal(string: "7.5")!, "valid bucket should still decode")
 }
 
+func testBifrostLogsDecodesRowCostAndTokenUsage() throws {
+    let rows = try BifrostResponseDecoder.decodeLogsRows(from: fixtureData("bifrost-logs.json"))
+    let analytics = try BifrostResponseDecoder.decodeLogsAnalytics(from: fixtureData("bifrost-logs.json"), calendar: fixedCalendar())
+
+    try expectEqual(rows.count, 2, "logs fallback should decode row-level entries")
+    try expectEqual(rows[0].date, try fixedDate("2026-05-18").addingTimeInterval(10 * 3600 + 15 * 60 + 30), "log row timestamp should decode")
+    try expectEqual(rows[0].spendUSD, Decimal(string: "1.25")!, "log row cost should decode")
+    try expectEqual(analytics.dailyPoints[0].totals.promptTokens, 300, "fallback analytics should aggregate prompt tokens")
+    try expectEqual(analytics.dailyPoints[0].totals.completionTokens, 150, "fallback analytics should aggregate completion tokens")
+    try expectEqual(analytics.dailyPoints[0].totals.totalTokens, 450, "fallback analytics should aggregate total tokens")
+}
+
+func testBifrostLogsDecodesStatsTotals() throws {
+    let analytics = try BifrostResponseDecoder.decodeLogsAnalytics(from: fixtureData("bifrost-logs.json"), calendar: fixedCalendar())
+
+    try expectEqual(analytics.totalSpendUSD, 4, "logs stats should expose aggregate spend")
+    try expectEqual(analytics.totals.totalTokens, 450, "logs stats should expose aggregate tokens")
+    try expectEqual(analytics.totals.apiRequests, 2, "logs stats should expose aggregate requests")
+    try expectEqual(analytics.totals.successfulRequests, 2, "logs stats should expose successful requests")
+    try expectEqual(analytics.totals.failedRequests, 0, "logs stats should expose failed requests")
+    try expectEqual(analytics.source, .spendLogsFallback, "logs analytics should be marked as fallback source")
+}
+
+func testBifrostLogsRequestUsesRFC3339StartAndEndTime() async throws {
+    let loader = StubURLLoader(data: try fixtureData("bifrost-logs.json"))
+    let client = BifrostClient(baseURL: URL(string: "https://bifrost.example.internal")!, apiKey: "secret-token", loader: loader)
+
+    _ = try await client.fetchSpendRows(range: try utcDateRange(), userContext: nil)
+
+    let components = URLComponents(url: loader.requests.first!.url!, resolvingAgainstBaseURL: false)
+    let query = Dictionary(uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+    try expectEqual(loader.requests.first?.url?.path, "/api/logs", "logs request path should be correct")
+    try expectEqual(query["start_time"], "2026-05-18T00:00:00Z", "start_time should use RFC3339")
+    try expectEqual(query["end_time"], "2026-05-19T00:00:00Z", "end_time should use RFC3339")
+    try expectEqual(query["limit"], "1000", "logs fallback should request a bounded page size")
+    try expectEqual(query["sort_by"], "timestamp", "logs fallback should request stable timestamp ordering")
+    try expectEqual(query["order"], "asc", "logs fallback should request ascending rows for daily aggregation")
+    try expectEqual(loader.requests.first?.value(forHTTPHeaderField: "Authorization"), "Bearer secret-token", "Bifrost requests should use existing bearer credential scheme")
+}
+
 func testReleaseUpdateCheckerDetectsNewerRelease() async throws {
     let payload = """
     {
@@ -3956,7 +3996,9 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testHandleSecondaryClickDisablesRefreshInBuiltMenuWhileRefreshIsRunning", testHandleSecondaryClickDisablesRefreshInBuiltMenuWhileRefreshIsRunning),
     ("testBifrostDashboardDecodesTotalsAndDailyCostBuckets", testBifrostDashboardDecodesTotalsAndDailyCostBuckets),
     ("testBifrostDashboardDecodesTokenUsageTotals", testBifrostDashboardDecodesTokenUsageTotals),
-    ("testBifrostDashboardSkipsMalformedBucketsWithoutDroppingTotals", testBifrostDashboardSkipsMalformedBucketsWithoutDroppingTotals)
+    ("testBifrostDashboardSkipsMalformedBucketsWithoutDroppingTotals", testBifrostDashboardSkipsMalformedBucketsWithoutDroppingTotals),
+    ("testBifrostLogsDecodesRowCostAndTokenUsage", testBifrostLogsDecodesRowCostAndTokenUsage),
+    ("testBifrostLogsDecodesStatsTotals", testBifrostLogsDecodesStatsTotals)
 ]
 
 let asyncTests: [(String, () async throws -> Void)] = [
@@ -3975,6 +4017,7 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testLiteLLMGatewayAdapterMapsUserContext", testLiteLLMGatewayAdapterMapsUserContext),
     ("testLiteLLMGatewayAdapterMapsSpendAnalyticsAndFallbackRows", testLiteLLMGatewayAdapterMapsSpendAnalyticsAndFallbackRows),
     ("testLiteLLMGatewayAdapterMapsKeyContextEndpoints", testLiteLLMGatewayAdapterMapsKeyContextEndpoints),
+    ("testBifrostLogsRequestUsesRFC3339StartAndEndTime", testBifrostLogsRequestUsesRFC3339StartAndEndTime),
     ("testReleaseUpdateCheckerDetectsNewerRelease", testReleaseUpdateCheckerDetectsNewerRelease),
     ("testReleaseUpdateCheckerIgnoresSameVersion", testReleaseUpdateCheckerIgnoresSameVersion),
     ("testKeyEndpointsMapUnauthorizedWithoutBreakingSpend", testKeyEndpointsMapUnauthorizedWithoutBreakingSpend),
