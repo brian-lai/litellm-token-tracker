@@ -1122,6 +1122,42 @@ func testBifrostFallbackFailureReturnsStaleSnapshotWhenAvailable() async throws 
     try expectEqual(message, "Showing last known spend", "stale message should match existing behavior")
 }
 
+func testBifrostLogsIncludeProviderEndpointAndCorrelationIDWithoutSecrets() async throws {
+    let logger = CapturingLogger()
+    let loader = StubURLLoader(data: try fixtureData("bifrost-dashboard.json"))
+    let client = BifrostClient(baseURL: URL(string: "https://bifrost.example.internal")!, apiKey: "secret-token", loader: loader, logger: logger)
+
+    _ = try await client.fetchSpendAnalytics(range: try utcDateRange(), userContext: nil)
+
+    let event = try logger.events.first.unwrap("Bifrost gateway log event")
+    try expectEqual(event.gatewayProvider, .bifrost, "Bifrost logs should include provider")
+    try expectEqual(event.endpoint, "/api/logs/dashboard", "Bifrost logs should include endpoint")
+    try expect(!event.correlationID.isEmpty, "Bifrost logs should include correlation id")
+    try expect(!String(describing: logger.events).contains("secret-token"), "Bifrost logs should not contain API keys")
+    try expect(!String(describing: logger.events).contains("Bearer"), "Bifrost logs should not contain authorization headers")
+}
+
+func testBifrostFallbackEmitsFallbackSourceSignal() async throws {
+    let loader = SequenceURLLoader(responses: [
+        .init(data: Data(#"{"error":"dashboard unavailable"}"#.utf8), statusCode: 500),
+        .init(data: try fixtureData("bifrost-logs.json"))
+    ])
+    let service = SpendService(
+        apiKeyStore: FakeAPIKeyStore(result: .success("secret-token")),
+        configurationStore: StaticAppConfigurationStore(configuration: AppConfiguration(baseURL: URL(string: "https://bifrost.example.internal")!, spendLimitUSD: 80, gatewayProvider: .bifrost)),
+        gatewayClientFactory: { _, baseURL, apiKey in
+            BifrostClient(baseURL: baseURL, apiKey: apiKey, loader: loader)
+        }
+    )
+
+    let result = await service.refresh(range: .today, now: try fixedDate("2026-05-18"), calendar: fixedCalendar())
+
+    guard case let .refreshed(snapshot) = result else {
+        throw TestFailure(description: "Bifrost logs fallback should refresh snapshot")
+    }
+    try expectEqual(snapshot.analytics?.source, .spendLogsFallback, "Bifrost fallback should emit fallback source signal")
+}
+
 func testReleaseUpdateCheckerDetectsNewerRelease() async throws {
     let payload = """
     {
@@ -4125,6 +4161,8 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testRefreshUsesBifrostAdapterWhenGatewayProviderIsBifrost", testRefreshUsesBifrostAdapterWhenGatewayProviderIsBifrost),
     ("testBifrostPrimaryFailureFallsBackToLogs", testBifrostPrimaryFailureFallsBackToLogs),
     ("testBifrostFallbackFailureReturnsStaleSnapshotWhenAvailable", testBifrostFallbackFailureReturnsStaleSnapshotWhenAvailable),
+    ("testBifrostLogsIncludeProviderEndpointAndCorrelationIDWithoutSecrets", testBifrostLogsIncludeProviderEndpointAndCorrelationIDWithoutSecrets),
+    ("testBifrostFallbackEmitsFallbackSourceSignal", testBifrostFallbackEmitsFallbackSourceSignal),
     ("testReleaseUpdateCheckerDetectsNewerRelease", testReleaseUpdateCheckerDetectsNewerRelease),
     ("testReleaseUpdateCheckerIgnoresSameVersion", testReleaseUpdateCheckerIgnoresSameVersion),
     ("testKeyEndpointsMapUnauthorizedWithoutBreakingSpend", testKeyEndpointsMapUnauthorizedWithoutBreakingSpend),
