@@ -47,9 +47,7 @@ public struct SpendService: SpendServicing {
             currentScope = scope
             let client = clientFactory(configuration.gatewayProvider, baseURL, apiKey)
             let gatewayUser = try await client.fetchCurrentUserContext()
-            guard let user = gatewayUser.liteLLMUserContext else {
-                throw GatewayClientError.malformedResponse
-            }
+            let user = gatewayUser.liteLLMUserContext
             let dateRange = rangeResolver.dateRange(for: range, now: now, calendar: calendar)
             let rangeBudgetUSD = budgetForRange(
                 dailyBudgetUSD: configuration.spendLimitUSD,

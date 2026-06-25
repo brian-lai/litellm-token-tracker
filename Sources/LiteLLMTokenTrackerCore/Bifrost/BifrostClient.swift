@@ -19,11 +19,17 @@ public struct BifrostClient: GatewayClientProtocol {
     }
 
     public func fetchCurrentUserContext() async throws -> GatewayUserContext {
-        throw GatewayClientError.notImplemented
+        GatewayUserContext()
     }
 
     public func fetchSpendAnalytics(range: DateRange, userContext: GatewayUserContext?) async throws -> SpendAnalyticsSummary {
-        throw GatewayClientError.notImplemented
+        let request = try makeDashboardRequest(range: range)
+        let data = try await perform(request, endpoint: "/api/logs/dashboard").data
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = range.timeZone
+        let analytics = try BifrostResponseDecoder.decodeDashboard(from: data, calendar: calendar)
+        logger.log(AppLogEvent(correlationID: correlationID(), gatewayProvider: .bifrost, endpoint: "/api/logs/dashboard", rowCount: analytics.dailyPoints.count))
+        return analytics
     }
 
     public func fetchSpendRows(range: DateRange, userContext: GatewayUserContext?) async throws -> [SpendLogSummaryRow] {
@@ -51,6 +57,15 @@ public struct BifrostClient: GatewayClientProtocol {
             URLQueryItem(name: "offset", value: "0"),
             URLQueryItem(name: "sort_by", value: "timestamp"),
             URLQueryItem(name: "order", value: "asc")
+        ]
+        return try request(from: components)
+    }
+
+    public func makeDashboardRequest(range: DateRange) throws -> URLRequest {
+        var components = try components(path: "/api/logs/dashboard")
+        components.queryItems = [
+            URLQueryItem(name: "start_time", value: BifrostClient.rfc3339Formatter.string(from: range.startDate)),
+            URLQueryItem(name: "end_time", value: BifrostClient.rfc3339Formatter.string(from: range.endDate))
         ]
         return try request(from: components)
     }
