@@ -12,4 +12,13 @@ public enum GatewayProvider: String, CaseIterable, Equatable, Codable, Sendable 
             return "Bifrost"
         }
     }
+
+    public var defaultBaseURL: URL {
+        switch self {
+        case .litellm:
+            return URL(string: "https://litellm.justworksai.net")!
+        case .bifrost:
+            return URL(string: "https://llm-proxy.internal-tools.justworks.cc")!
+        }
+    }
 }

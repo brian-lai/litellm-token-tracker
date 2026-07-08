@@ -1567,6 +1567,11 @@ func testConfigurationStorePersistsBaseURL() throws {
     try expectEqual(configuration.baseURL, baseURL, "configuration store should persist base URL")
 }
 
+func testGatewayProviderDefaultURLsAreStable() throws {
+    try expectEqual(GatewayProvider.litellm.defaultBaseURL.absoluteString, "https://litellm.justworksai.net", "LiteLLM should use the Justworks LiteLLM gateway by default")
+    try expectEqual(GatewayProvider.bifrost.defaultBaseURL.absoluteString, "https://llm-proxy.internal-tools.justworks.cc", "Bifrost should use the internal tools proxy by default")
+}
+
 func testConfigurationStoreDefaultsGatewayProviderToLiteLLM() throws {
     let fileURL = temporaryConfigurationFileURL()
     let store = LocalAppConfigurationStore(fileURL: fileURL, legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused"))
@@ -2254,6 +2259,56 @@ func testChangingGatewayDraftDoesNotApplyUntilSave() async throws {
     viewModel.gatewayProviderDraft = .bifrost
 
     try expectEqual(try configurationStore.loadConfiguration().gatewayProvider, .litellm, "gateway draft changes should not persist before Save")
+}
+
+@MainActor
+func testChangingGatewayDraftAppliesProviderDefaultBaseURL() async throws {
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://custom-litellm.example.internal")!, spendLimitUSD: 80, gatewayProvider: .litellm))
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), configurationStore: configurationStore)
+
+    viewModel.gatewayProviderDraft = .bifrost
+
+    try expectEqual(viewModel.baseURLDraft, "https://llm-proxy.internal-tools.justworks.cc", "selecting Bifrost should draft its default base URL")
+
+    viewModel.gatewayProviderDraft = .litellm
+
+    try expectEqual(viewModel.baseURLDraft, "https://litellm.justworksai.net", "selecting LiteLLM should draft its default base URL")
+}
+
+@MainActor
+func testInitialConfigurationPreservesPersistedBaseURL() async throws {
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://custom-bifrost.example.internal")!, spendLimitUSD: 80, gatewayProvider: .bifrost))
+
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), configurationStore: configurationStore)
+
+    try expectEqual(viewModel.gatewayProviderDraft, .bifrost, "initialization should load the persisted provider")
+    try expectEqual(viewModel.baseURLDraft, "https://custom-bifrost.example.internal", "initialization should not rewrite an existing saved base URL")
+}
+
+@MainActor
+func testSavingGatewayUsesAppliedDefaultBaseURL() async throws {
+    let configurationStore = LocalAppConfigurationStore(
+        fileURL: temporaryConfigurationFileURL(),
+        legacyFileURL: temporaryConfigurationFileURL(namespace: "litellm_token_tracker_tests_unused")
+    )
+    try configurationStore.saveConfiguration(AppConfiguration(baseURL: URL(string: "https://litellm.example.internal")!, spendLimitUSD: 80, gatewayProvider: .litellm))
+    let viewModel = SpendDashboardViewModel(spendService: RecordingSpendService(results: []), configurationStore: configurationStore)
+    viewModel.spendLimitDraft = "80"
+
+    viewModel.gatewayProviderDraft = .bifrost
+    viewModel.saveSettings()
+
+    let configuration = try configurationStore.loadConfiguration()
+    try expectEqual(configuration.gatewayProvider, .bifrost, "settings save should persist the selected Bifrost provider")
+    try expectEqual(configuration.baseURL?.absoluteString, "https://llm-proxy.internal-tools.justworks.cc", "settings save should persist the Bifrost default URL applied by selection")
 }
 
 @MainActor
@@ -4293,6 +4348,7 @@ let syncTests: [(String, () throws -> Void)] = [
     ("testDoesNotExposeKeyInErrorDescription", testDoesNotExposeKeyInErrorDescription),
     ("testConfigurationStorePersistsSpendLimit", testConfigurationStorePersistsSpendLimit),
     ("testConfigurationStorePersistsBaseURL", testConfigurationStorePersistsBaseURL),
+    ("testGatewayProviderDefaultURLsAreStable", testGatewayProviderDefaultURLsAreStable),
     ("testConfigurationStoreDefaultsGatewayProviderToLiteLLM", testConfigurationStoreDefaultsGatewayProviderToLiteLLM),
     ("testConfigurationStorePersistsGatewayProvider", testConfigurationStorePersistsGatewayProvider),
     ("testConfigurationStoreFallsBackToLiteLLMForInvalidGatewayValue", testConfigurationStoreFallsBackToLiteLLMForInvalidGatewayValue),
@@ -4456,6 +4512,9 @@ let asyncTests: [(String, () async throws -> Void)] = [
     ("testInvalidSettingsSaveKeepsSettingsMode", testInvalidSettingsSaveKeepsSettingsMode),
     ("testSettingsModeShowsGatewaySelector", testSettingsModeShowsGatewaySelector),
     ("testChangingGatewayDraftDoesNotApplyUntilSave", testChangingGatewayDraftDoesNotApplyUntilSave),
+    ("testChangingGatewayDraftAppliesProviderDefaultBaseURL", testChangingGatewayDraftAppliesProviderDefaultBaseURL),
+    ("testInitialConfigurationPreservesPersistedBaseURL", testInitialConfigurationPreservesPersistedBaseURL),
+    ("testSavingGatewayUsesAppliedDefaultBaseURL", testSavingGatewayUsesAppliedDefaultBaseURL),
     ("testSavingGatewayClearsEndpointScopedStateAndRequiresRefresh", testSavingGatewayClearsEndpointScopedStateAndRequiresRefresh),
     ("testBifrostSetupErrorMessagesReferenceSelectedProvider", testBifrostSetupErrorMessagesReferenceSelectedProvider),
     ("testSwitchingGatewayClearsVisibleKeyContextAndDiagnosticsSource", testSwitchingGatewayClearsVisibleKeyContextAndDiagnosticsSource),
