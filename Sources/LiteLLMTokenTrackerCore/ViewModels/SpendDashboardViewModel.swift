@@ -12,6 +12,7 @@ public final class SpendDashboardViewModel {
     private let releaseUpdateChecker: ReleaseUpdateChecking?
     private let appVersion: String
     private var endpointStateGeneration = 0
+    private var appliesGatewayDefaultURLChanges = false
 
     public var selectedRange: SpendRange = .today
     public var currentSnapshot: SpendSnapshot?
@@ -29,7 +30,11 @@ public final class SpendDashboardViewModel {
     public var apiKeyDraft = ""
     public var spendLimitDraft = ""
     public var baseURLDraft = ""
-    public var gatewayProviderDraft: GatewayProvider = .litellm
+    public var gatewayProviderDraft: GatewayProvider = .litellm {
+        didSet {
+            applyGatewayDefaultBaseURLIfNeeded(previousProvider: oldValue)
+        }
+    }
     public var settingsErrorMessage: String?
     public var menuBarMetric: MenuBarMetric
     public var availableUpdateURL: URL?
@@ -82,6 +87,7 @@ public final class SpendDashboardViewModel {
         self.spendLimitDraft = NSDecimalNumber(decimal: configuration.spendLimitUSD).stringValue
         self.baseURLDraft = configuration.baseURL?.absoluteString ?? ""
         self.gatewayProviderDraft = configuration.gatewayProvider
+        self.appliesGatewayDefaultURLChanges = true
         syncSetupState(preservingCurrentError: false)
     }
 
@@ -439,5 +445,12 @@ public final class SpendDashboardViewModel {
             return configuration.gatewayProvider.displayName
         }
         return gatewayProviderDraft.displayName
+    }
+
+    private func applyGatewayDefaultBaseURLIfNeeded(previousProvider: GatewayProvider) {
+        guard appliesGatewayDefaultURLChanges, previousProvider != gatewayProviderDraft else {
+            return
+        }
+        baseURLDraft = gatewayProviderDraft.defaultBaseURL.absoluteString
     }
 }
